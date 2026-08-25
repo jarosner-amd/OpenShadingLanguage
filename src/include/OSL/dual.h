@@ -1084,7 +1084,7 @@ OSL_HOSTDEVICE OSL_FORCEINLINE Dual<T,P> fast_safe_pow(const Dual<T,P> &u, const
 template<class T, int P>
 OSL_HOSTDEVICE OSL_FORCEINLINE Dual<T,P> safe_log2 (const Dual<T,P> &a)
 {
-    T f = safe_log2(a.val());
+    T f = OIIO::safe_log2(a.val());
     T df = a.val() < std::numeric_limits<T>::min() ? T(0) : T(1) / (a.val() * T(M_LN2));
     return dualfunc (a, f, df);
 }
@@ -1103,7 +1103,7 @@ OSL_HOSTDEVICE OSL_FORCEINLINE Dual<T,P> fast_log2(const Dual<T,P> &a)
 template<class T, int P>
 OSL_HOSTDEVICE OSL_FORCEINLINE Dual<T,P> safe_log10 (const Dual<T,P> &a)
 {
-    T f = safe_log10(a.val());
+    T f = OIIO::safe_log10(a.val());
     T df = a.val() < std::numeric_limits<T>::min() ? T(0) : T(1) / (a.val() * T(M_LN10));
     return dualfunc (a, f, df);
 }
