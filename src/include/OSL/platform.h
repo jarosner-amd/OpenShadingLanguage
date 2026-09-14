@@ -563,9 +563,14 @@ OSL_FORCEINLINE OSL_HOSTDEVICE To bitcast(const From& src) noexcept {
     return dst;
 }
 
+// NOTE: __x86_64__ is defined during a CUDA or HIP *device* compile as well,
+// because offload compilation also defines the host's macros via the auxiliary
+// target. Both device cases must therefore be excluded explicitly, or these
+// x86 CPU intrinsics are enabled for a GPU target.
 #if defined(__x86_64__) && !defined(__CUDA_ARCH__) && \
-    (defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER) \
-     || OSL_CLANG_VERSION >= 100000 || OSL_APPLE_CLANG_VERSION >= 130000)
+    !defined(__HIP_DEVICE_COMPILE__) && \
+    (defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER) || \
+     OSL_CLANG_VERSION >= 100000 || OSL_APPLE_CLANG_VERSION >= 130000)
 // On x86/x86_64 for certain compilers we can use Intel CPU intrinsics for
 // some common bitcast cases that might be even more understandable to the
 // compiler and generate better code without its getting confused about the
