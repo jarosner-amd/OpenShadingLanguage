@@ -2643,7 +2643,7 @@ init_function_name(const ShadingSystemImpl& shadingsys,
                    const ShaderGroup& group, bool api = false);
 
 std::string
-fused_function_name(const ShaderGroup& group);
+fused_function_name(const ShaderGroup& group, bool api = false);
 
 /// Base class for objects that examine compiled shader groups (oso).
 /// This includes optimization passes, "back end" code generators, etc.
