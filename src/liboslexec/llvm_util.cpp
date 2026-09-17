@@ -6437,7 +6437,7 @@ bool
 LLVM_Util::ptx_compile_group(llvm::Module*, const std::string& name,
                              std::string& out)
 {
-#ifdef OSL_USE_OPTIX
+#if OSL_USE_OPTIX
     llvm::TargetMachine* target_machine = nvptx_target_machine();
     llvm::legacy::PassManager mpm;
     llvm::SmallString<4096> assembly;
