@@ -2230,7 +2230,7 @@ ShadingSystemImpl::getattribute(ShaderGroup* group, string_view name,
         return true;
     }
     if (name == "group_fused_name" && type.basetype == TypeDesc::STRING) {
-        *(ustring*)val = fused_function_name(*group);
+        *(ustring*)val = fused_function_name(*group, true);
         return true;
     }
     if (name == "layer_osofiles" && type.basetype == TypeDesc::STRING) {

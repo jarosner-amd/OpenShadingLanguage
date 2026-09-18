@@ -217,12 +217,14 @@ init_function_name(const ShadingSystemImpl& shadingsys,
 }
 
 std::string
-fused_function_name(const ShaderGroup& group)
+fused_function_name(const ShaderGroup& group, bool api)
 {
     int nlayers          = group.nlayers();
     ShaderInstance* inst = group[nlayers - 1];
+    bool use_optix       = inst->shadingsys().use_optix();
+    const char* prefix   = use_optix && api ? "__direct_callable__" : "";
 
-    return fmtformat("__direct_callable__fused_{}_name_{}", group.name(),
+    return fmtformat("{}fused_{}_name_{}", prefix, group.name(),
                      inst->layername());
 }
 
@@ -1495,7 +1497,7 @@ BackendLLVM::build_llvm_optix_callables()
 llvm::Function*
 BackendLLVM::build_llvm_fused_callable(void)
 {
-    std::string fused_name = fused_function_name(group());
+    std::string fused_name = fused_function_name(group(), true);
 
     // Start building the fused function
     ll.current_function(
