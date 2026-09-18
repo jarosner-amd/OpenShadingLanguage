@@ -115,6 +115,15 @@ osl_allocate_weighted_closure_component(OpaqueExecContextPtr oec, int id,
     return comp;
 }
 
+// The two closure-printing shadeops below are host-only. They use
+// std::ostringstream and call print_closure(), which is never compiled to
+// bitcode. They carry no OSL_HOSTDEVICE, so a device compile already omits
+// them. Excluding them explicitly keeps the embedded bitcode free of the
+// exception-handling metadata that <sstream> drags in, which on Windows
+// references PE-only symbols (__ImageBase, ??_7type_info@@6B@) that neither
+// the JIT nor any device target can resolve.
+#ifndef OSL_COMPILING_TO_BITCODE
+
 // Deprecated, remove when conversion from ustring to ustringhash is finished
 OSL_SHADEOP const char*
 osl_closure_to_string(OpaqueExecContextPtr oec, const void* c_)
@@ -141,6 +150,8 @@ osl_closure_to_ustringhash(OpaqueExecContextPtr oec, const void* c_)
                   /*treat_ustrings_as_hash*/ true);
     return ustring(stream.str()).hash();
 }
+
+#endif  // !OSL_COMPILING_TO_BITCODE
 
 
 
