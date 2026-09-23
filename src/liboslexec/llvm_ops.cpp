@@ -109,7 +109,7 @@ void* __dso_handle = 0;  // necessary to avoid linkage issues in bitcode
 #define DCOL(x)   (*(Dual2<Color3>*)x)
 
 #ifndef OSL_SHADEOP
-#    ifdef __CUDACC__
+#    if OSL_GPU
 #        define OSL_SHADEOP \
             extern "C" __device__ OSL_LLVM_EXPORT __attribute__((always_inline))
 #    elif defined(OSL_COMPILING_TO_BITCODE)
@@ -999,7 +999,7 @@ osl_range_check(int indexvalue, int length, ustringhash_pod symname,
 }
 
 
-#ifdef __CUDA_ARCH__
+#if OSL_GPU_DEVICE_COMPILE
 extern "C" {
 __global__ void
 __direct_callable__dummy_shadeops()
