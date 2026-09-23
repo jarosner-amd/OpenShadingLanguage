@@ -24,7 +24,28 @@
 
 #include <OSL/oslversion.h>
 
-#if defined(__x86_64__) && !defined(__CUDA_ARCH__)
+// OSL_GPU is true when compiling under any GPU offload language mode, in
+// either the host or the device compiler pass. OSL_GPU_DEVICE_COMPILE is
+// true only during the device pass. CUDA and HIP each spell both concepts
+// differently, so test these rather than a vendor macro. Defined this early
+// because the x86 intrinsic include below already needs them.
+#ifndef OSL_GPU
+#  if defined(__CUDACC__) || defined(__HIP__)
+#    define OSL_GPU 1
+#  else
+#    define OSL_GPU 0
+#  endif
+#endif
+
+#ifndef OSL_GPU_DEVICE_COMPILE
+#  if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+#    define OSL_GPU_DEVICE_COMPILE 1
+#  else
+#    define OSL_GPU_DEVICE_COMPILE 0
+#  endif
+#endif
+
+#if defined(__x86_64__) && !OSL_GPU_DEVICE_COMPILE
 #   include <x86intrin.h>
 #endif
 
@@ -44,6 +65,10 @@
 //                when using nvcc or clang with ptx target."
 //   __CUDA_ARCH__  is only defined when doing the device pass. "Do this only
 //                for code that will actually run on the GPU."
+//   __HIP__      is the HIP counterpart of __CUDACC__, and
+//   __HIP_DEVICE_COMPILE__ the HIP counterpart of __CUDA_ARCH__.
+//                Prefer the vendor-neutral OSL_GPU and OSL_GPU_DEVICE_COMPILE
+//                defined below over testing any of these four directly.
 
 // Define OSL_GNUC_VERSION to hold an encoded gcc version (e.g. 40802 for
 // 4.8.2), or 0 if not a GCC release. N.B.: This will be 0 for clang.
@@ -397,7 +422,7 @@
 
 
 #ifndef OSL_HOSTDEVICE
-#  ifdef __CUDACC__
+#  if OSL_GPU
 #    define OSL_HOSTDEVICE __host__ __device__
 #  else
 #    define OSL_HOSTDEVICE
@@ -405,7 +430,7 @@
 #endif
 
 #ifndef OSL_DEVICE
-#  ifdef __CUDACC__
+#  if OSL_GPU
 #    define OSL_DEVICE __device__
 #  else
 #    define OSL_DEVICE
@@ -413,7 +438,7 @@
 #endif
 
 #ifndef OSL_CONSTANT_DATA
-#  ifdef __CUDACC__
+#  if OSL_GPU
 #    define OSL_CONSTANT_DATA __constant__
 #  else
 #    define OSL_CONSTANT_DATA
@@ -491,7 +516,7 @@
 ///
 /// OSL_ASSERT_MSG(condition,msg,...) lets you add formatted output (a la
 /// printf) to the failure message.
-#ifndef __CUDA_ARCH__
+#if !OSL_GPU_DEVICE_COMPILE
 #    define OSL_ASSERT_PRINT(...) (std::fprintf(stderr, __VA_ARGS__))
 #else
 #    define OSL_ASSERT_PRINT(...) (printf(__VA_ARGS__))
@@ -519,10 +544,10 @@
 /// dependency on this header from a particular place (and don't mind that
 /// assert won't format identically on all platforms).
 ///
-/// These macros are no-ops when compiling for CUDA because they were found
+/// These macros are no-ops when compiling for a GPU because they were found
 /// to cause strange issues in device code (e.g., function bodies being
 /// eliminated when OSL_DASSERT is used).
-#if !defined(NDEBUG) && !defined(__CUDACC__)
+#if !defined(NDEBUG) && !OSL_GPU
 #    define OSL_DASSERT OSL_ASSERT
 #    define OSL_DASSERT_MSG OSL_ASSERT_MSG
 #else
@@ -563,9 +588,13 @@ OSL_FORCEINLINE OSL_HOSTDEVICE To bitcast(const From& src) noexcept {
     return dst;
 }
 
-#if defined(__x86_64__) && !defined(__CUDA_ARCH__) && \
-    (defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER) \
-     || OSL_CLANG_VERSION >= 100000 || OSL_APPLE_CLANG_VERSION >= 130000)
+// NOTE: __x86_64__ is defined during a GPU *device* compile as well, because
+// offload compilation also defines the host's macros via the auxiliary target.
+// The device pass must therefore be excluded explicitly, or these x86 CPU
+// intrinsics are enabled for a GPU target.
+#if defined(__x86_64__) && !OSL_GPU_DEVICE_COMPILE && \
+    (defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER) || \
+     OSL_CLANG_VERSION >= 100000 || OSL_APPLE_CLANG_VERSION >= 130000)
 // On x86/x86_64 for certain compilers we can use Intel CPU intrinsics for
 // some common bitcast cases that might be even more understandable to the
 // compiler and generate better code without its getting confused about the
