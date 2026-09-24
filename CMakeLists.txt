@@ -138,6 +138,12 @@ set (OSL_PTX_INSTALL_DIR "${CMAKE_INSTALL_FULL_DATADIR}/${PROJECT_NAME}/ptx"
 set (CMAKE_DEBUG_POSTFIX "" CACHE STRING "Library naming postfix for Debug builds (e.g., '_debug')")
 option (OSL_USTRINGREP_IS_HASH "Always use ustringhash for strings" OFF)
 
+option (OSL_USE_HART "Enable experimental HART build infrastructure" OFF)
+set (HART_TARGET_ARCHITECTURES "gfx1201;gfx1100;gfx1151" CACHE STRING
+     "AMD GPU architectures for HART device code (semicolon-separated list)")
+message(STATUS "OSL_USE_HART: ${OSL_USE_HART}")
+message(STATUS "HART_TARGET_ARCHITECTURES: ${HART_TARGET_ARCHITECTURES}")
+
 
 set (OSL_NO_DEFAULT_TEXTURESYSTEM OFF CACHE BOOL "Do not use create a raw OIIO::TextureSystem")
 if (OSL_NO_DEFAULT_TEXTURESYSTEM)
@@ -212,7 +218,7 @@ include (pythonutils)
 include (externalpackages)
 include (flexbison)
 include (cuda_macros)
-include (llvm_macros)
+include (OSL_llvm_macros)
 
 # Include all our testing apparatus and utils, but not if it's a subproject
 if (${PROJECT_NAME}_BUILD_TESTS AND PROJECT_IS_TOP_LEVEL)
@@ -325,7 +331,8 @@ configure_package_config_file ("${PROJECT_SOURCE_DIR}/src/cmake/Config.cmake.in"
 install (FILES "${OSL_PROJECT_CONFIG}" "${OSL_VERSION_CONFIG}"
         DESTINATION "${OSL_CONFIG_INSTALL_DIR}")
 
-install (FILES src/cmake/llvm_macros.cmake DESTINATION cmake)
+install (FILES src/cmake/OSL_llvm_macros.cmake
+         DESTINATION "${OSL_CONFIG_INSTALL_DIR}")
 
 set (PERMISSION_FLAGS OWNER_EXECUTE OWNER_READ OWNER_WRITE
                       GROUP_EXECUTE GROUP_READ
