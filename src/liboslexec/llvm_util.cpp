@@ -1640,8 +1640,17 @@ LLVM_Util::make_jit_execengine(std::string* err, TargetISA requestedISA,
         OSL_ASSERT(m_llvm_module != nullptr);
         OSL_DEV_ONLY(std::cout << "debugging symbols" << std::endl);
 
-        module()->addModuleFlag(llvm::Module::Error, "Debug Info Version",
-                                llvm::DEBUG_METADATA_VERSION);
+        // Some clang versions (observed starting with clang 23) embed their
+        // own "Debug Info Version" module flag into the bitcode they emit,
+        // even with no -g. Adding a second flag under the same key here is
+        // rejected outright by the verifier ("module flag identifiers must
+        // be unique"), regardless of whether the two agree on merge
+        // behavior or value. Only add ours if the module doesn't already
+        // have one.
+        if (!module()->getModuleFlag("Debug Info Version")) {
+            module()->addModuleFlag(llvm::Module::Error, "Debug Info Version",
+                                    llvm::DEBUG_METADATA_VERSION);
+        }
 
         OSL_MAYBE_UNUSED unsigned int modulesDebugInfoVersion = 0;
         if (auto* Val = llvm::mdconst::dyn_extract_or_null<llvm::ConstantInt>(
