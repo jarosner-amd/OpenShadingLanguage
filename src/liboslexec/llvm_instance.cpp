@@ -298,6 +298,9 @@ BackendLLVM::llvm_type_groupdata()
     std::vector<llvm::Type*> fields;
     int offset = 0;
     int order  = 0;
+    // Widest alignment any field in the block needs. Host allocation gets
+    // this for free from new/malloc, but a device allocator has to be told.
+    size_t max_align = 1;
     m_groupdata_field_names.clear();
 
     if (llvm_debug() >= 2)
@@ -343,6 +346,7 @@ BackendLLVM::llvm_type_groupdata()
                 fmtformat("userdata{}_{}_", i, names[i]));
             // Alignment
             int align = type.basesize();
+            max_align = std::max(max_align, type.basesize());
             offset    = OIIO::round_to_multiple_of_pow2(offset, align);
             if (llvm_debug() >= 2)
                 std::cout << "  userdata " << names[i] << ' ' << type
@@ -391,6 +395,7 @@ BackendLLVM::llvm_type_groupdata()
             size_t align = sym.typespec().is_closure_based()
                                ? sizeof(void*)
                                : sym.typespec().simpletype().basesize();
+            max_align    = std::max(max_align, align);
             if (offset & (align - 1))
                 offset += align - (offset & (align - 1));
             if (llvm_debug() >= 2)
@@ -407,6 +412,7 @@ BackendLLVM::llvm_type_groupdata()
         }
     }
     group().llvm_groupdata_size(offset);
+    group().llvm_groupdata_alignment(max_align);
     if (llvm_debug() >= 2)
         print(" Group struct had {} fields, total size {}\n\n", order, offset);
 
@@ -2528,11 +2534,12 @@ BackendLLVM::run()
 
 #if OSL_USE_OPTIX
     if (use_optix()) {
-        ll.ptx_compile_group(nullptr, group().name().string(),
-                             group().m_llvm_ptx_compiled_version);
-        if (group().m_llvm_ptx_compiled_version.empty()) {
+        std::string ptx;
+        ll.ptx_compile_group(nullptr, group().name().string(), ptx);
+        if (ptx.empty()) {
             OSL_ASSERT(0 && "Unable to generate PTX");
         }
+        group().set_ptx_compiled_version(ptx);
     } else
 #endif
     {
@@ -2557,8 +2564,9 @@ BackendLLVM::run()
         std::string cache_key = group().optix_cache_key();
         renderer()->cache_insert(
             "optix_ptx", cache_key,
-            optix_cache_wrap(group().m_llvm_ptx_compiled_version,
-                             group().llvm_groupdata_size()));
+            optix_cache_wrap(group().ptx_compiled_version(),
+                             group().llvm_groupdata_size(),
+                             group().llvm_groupdata_alignment()));
     }
 
     // We are destroying the entire module below,
