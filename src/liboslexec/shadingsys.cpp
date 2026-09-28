@@ -1061,6 +1061,24 @@ namespace Strings {
 namespace pvt {  // OSL::pvt
 
 
+// Build the GPU target descriptor from the renderer capabilities that
+// use_optix() and use_optix_cache() are already derived from, so the two
+// representations cannot disagree. OptiX is the only GPU backend wired up
+// today; the LLVM-level target fields stay empty until the emission path
+// starts consuming them.
+static GPUTargetDesc
+make_gpu_target_desc(bool use_optix, bool use_optix_cache)
+{
+    GPUTargetDesc desc;
+    if (use_optix) {
+        desc.backend      = GPUBackendKind::NVPTX;
+        desc.artifact     = GPUArtifactKind::PTX;
+        desc.enable_cache = use_optix_cache;
+    }
+    return desc;
+}
+
+
 ShadingSystemImpl::ShadingSystemImpl(RendererServices* renderer,
                                      TextureSystem* texturesystem,
                                      ErrorHandler* err)
@@ -1134,6 +1152,7 @@ ShadingSystemImpl::ShadingSystemImpl(RendererServices* renderer,
     , m_compile_report(0)
     , m_use_optix(renderer->supports("OptiX"))
     , m_use_optix_cache(m_use_optix && renderer->supports("optix_ptx_cache"))
+    , m_gpu_target(make_gpu_target_desc(m_use_optix, m_use_optix_cache))
     , m_max_optix_groupdata_alloc(0)
     , m_buffer_printf(true)
     , m_no_noise(false)
@@ -3618,7 +3637,7 @@ ShadingSystemImpl::ReParameter(ShaderGroup& group, string_view layername_,
         if (memcmp(group.interactive_arena_ptr() + offset, payload, size)) {
             memcpy(group.interactive_arena_ptr() + offset, payload,
                    type.size());
-            if (use_optix())
+            if (is_gpu_backend())
                 renderer()->copy_to_device(
                     group.device_interactive_arena().d_get() + offset, payload,
                     type.size());
