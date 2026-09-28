@@ -200,8 +200,11 @@ std::string
 layer_function_name(const ShaderGroup& group, const ShaderInstance& inst,
                     bool api)
 {
-    bool use_optix     = inst.shadingsys().use_optix();
-    const char* prefix = use_optix && api ? "__direct_callable__" : "";
+    // The __direct_callable__ prefix marks a group entry point on every GPU
+    // backend, not just NVPTX/OptiX -- confirmed against a second backend
+    // that relies on the same prefix to identify exports.
+    bool gpu           = inst.shadingsys().is_gpu_backend();
+    const char* prefix = gpu && api ? "__direct_callable__" : "";
     return fmtformat("{}osl_layer_group_{}_name_{}", prefix, group.name(),
                      inst.layername());
 }
@@ -210,8 +213,8 @@ std::string
 init_function_name(const ShadingSystemImpl& shadingsys,
                    const ShaderGroup& group, bool api)
 {
-    bool use_optix     = shadingsys.use_optix();
-    const char* prefix = use_optix && api ? "__direct_callable__" : "";
+    bool gpu           = shadingsys.is_gpu_backend();
+    const char* prefix = gpu && api ? "__direct_callable__" : "";
 
     return fmtformat("{}osl_init_group_{}", prefix, group.name());
 }
@@ -904,7 +907,8 @@ BackendLLVM::llvm_assign_initial_value(const Symbol& sym, bool force)
                     // *userdata_initialized = status;
                     ll.op_store(ll.op_int_to_int8(status),
                                 userdata_initializedPtr);
-                    if (!use_optix() && shadingsys().m_statslevel != 0) {
+                    // No device has a host-side ShadingContext to mutate.
+                    if (!is_gpu_backend() && shadingsys().m_statslevel != 0) {
                         // sg->context->incr_get_userdata_calls();
                         ll.call_function("osl_incr_get_userdata_calls",
                                          sg_void_ptr());
@@ -1390,9 +1394,12 @@ BackendLLVM::build_llvm_init()
     return ll.current_function();
 }
 
-// OptiX Callables:
-//  Builds three OptiX callables: an init wrapper, an entry layer wrapper,
+// GPU Callables:
+//  Builds three GPU callables: an init wrapper, an entry layer wrapper,
 //  and a "fused" callable that wraps both and owns the groupdata params buffer.
+//  Every GPU backend uses this same export shape, not just NVPTX/OptiX --
+//  confirmed against a second backend built on the same three-callable
+//  structure.
 //
 //  Clients can either call both init + entry, or use the fused callable.
 //
@@ -1401,7 +1408,7 @@ BackendLLVM::build_llvm_init()
 //  direct callables.
 //
 std::vector<llvm::Function*>
-BackendLLVM::build_llvm_optix_callables()
+BackendLLVM::build_llvm_gpu_callables()
 {
     std::vector<llvm::Function*> funcs;
 
@@ -1882,10 +1889,10 @@ BackendLLVM::initialize_llvm_group()
     }
 
     // Set up optimization passes. Don't target the host if we're building
-    // for OptiX.
+    // for a GPU.
     ll.setup_optimization_passes(shadingsys().llvm_optimize(),
                                  shadingsys().llvm_target_host()
-                                     && !use_optix());
+                                     && !is_gpu_backend());
 
     // Clear the shaderglobals and groupdata types -- they will be
     // created on demand.
@@ -1898,8 +1905,9 @@ BackendLLVM::initialize_llvm_group()
 
     initialize_llvm_helper_function_map();
 
-    // Skipping this in the non-JIT OptiX case suppresses an LLVM warning
-    if (!use_optix())
+    // Pure MCJIT machinery: skipping it when we are emitting an artifact
+    // rather than JITing suppresses an LLVM warning.
+    if (!emits_artifact())
         ll.InstallLazyFunctionCreator(helper_function_lookup);
 
     for (HelperFuncMap::iterator i = llvm_helper_function_map.begin(),
@@ -1924,7 +1932,14 @@ BackendLLVM::initialize_llvm_group()
             types += advance;
         }
 #if OSL_USE_OPTIX
-        if (varargs && use_optix()) {
+        // Device targets do not support the C varargs ABI OSL relies on, so
+        // the helper is rewritten to take a fixed arg plus a void*. That need
+        // is generic to any device, hence is_gpu_backend() -- but note the
+        // enclosing #if still restricts this to OptiX-enabled builds, and the
+        // particular fixed-arg+void* shape comes from the OptiX printf ABI.
+        // Whether another backend wants that same shape has to be settled
+        // together with the printf lowering, not independently of it.
+        if (varargs && is_gpu_backend()) {
             varargs = false;
             params.push_back(ll.type_void_ptr());
         }
@@ -1933,8 +1948,9 @@ BackendLLVM::initialize_llvm_group()
                                              llvm_pass_type(rettype), params,
                                              varargs);
 
-        // Skipping this in the non-JIT OptiX case suppresses an LLVM warning
-        if (!use_optix())
+        // Binds an IR function to a host address for MCJIT -- meaningless
+        // when emitting an artifact instead of JITing.
+        if (!emits_artifact())
             ll.add_function_mapping(f, (void*)i->second.function);
     }
 
@@ -2345,9 +2361,9 @@ BackendLLVM::run()
         }
     }
 
-    std::vector<llvm::Function*> optix_externals;
-    if (use_optix())
-        optix_externals = build_llvm_optix_callables();
+    std::vector<llvm::Function*> gpu_externals;
+    if (is_gpu_backend())
+        gpu_externals = build_llvm_gpu_callables();
 
     // llvm::Function* entry_func = group().num_entry_layers() ? NULL : funcs[m_num_used_layers-1];
     m_stat_llvm_irgen_time += timer.lap();
@@ -2378,8 +2394,12 @@ BackendLLVM::run()
         // seems to yield about another 5-10% opt+JIT speed gain versus
         // merely internalizing.
         std::unordered_set<llvm::Function*> external_functions;
-        if (use_optix()) {
-            for (llvm::Function* func : optix_externals)
+        if (is_gpu_backend()) {
+            // Every GPU backend's export set is its direct-callable
+            // wrappers -- confirmed against a second backend built on the
+            // same three-callable structure. The CPU JIT path has no
+            // wrapper layer and takes the else arm below instead.
+            for (llvm::Function* func : gpu_externals)
                 external_functions.insert(func);
         } else {
             external_functions.insert(init_func);

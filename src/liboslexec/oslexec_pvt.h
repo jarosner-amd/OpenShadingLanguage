@@ -39,6 +39,7 @@
 #include <OSL/dual.h>
 #include <OSL/dual_vec.h>
 #include <OSL/genclosure.h>
+#include <OSL/gpu_target_desc.h>
 #include <OSL/llvm_util.h>
 #include <OSL/mask.h>
 #include <OSL/oslclosure.h>
@@ -666,8 +667,46 @@ public:
     ///
     TextureSystem* texturesys() const { return m_texturesys; }
 
-    bool use_optix() const { return m_use_optix; }
+    /// Describes which GPU backend, if any, shader groups are being compiled
+    /// for. Derived from the renderer capability queries that use_optix()
+    /// and use_optix_cache() are also derived from.
+    const GPUTargetDesc& gpu_target() const { return m_gpu_target; }
+
+    /// Are we compiling for a GPU at all, rather than the CPU JIT? The right
+    /// predicate for behavior that any device inherits regardless of vendor.
+    bool is_gpu_backend() const
+    {
+        return m_gpu_target.backend != GPUBackendKind::None;
+    }
+
+    /// Are we compiling for NVPTX specifically? Use this for genuine NVPTX
+    /// lowering and for OptiX ABI contracts, which other GPU backends must
+    /// not inherit.
+    bool is_nvptx_backend() const
+    {
+        return m_gpu_target.backend == GPUBackendKind::NVPTX;
+    }
+
+    /// Are we compiling for AMDGPU specifically?
+    bool is_amdgpu_backend() const
+    {
+        return m_gpu_target.backend == GPUBackendKind::AMDGPU;
+    }
+
+    /// Are we emitting a compiled artifact rather than JITing into this
+    /// process? A JIT-vs-AOT question rather than a GPU one, though it
+    /// happens to select exactly the GPU backends today.
+    bool emits_artifact() const
+    {
+        return m_gpu_target.artifact != GPUArtifactKind::None;
+    }
+
+    /// Compatibility wrapper over the target descriptor, kept while the
+    /// remaining use_optix() branch sites are migrated onto the predicates
+    /// above.
+    bool use_optix() const { return is_nvptx_backend(); }
     bool use_optix_cache() const { return m_use_optix_cache; }
+
     bool debug_nan() const { return m_debugnan; }
     bool debug_uninit() const { return m_debug_uninit; }
     bool lockgeom_default() const { return m_lockgeom_default; }
@@ -1016,6 +1055,9 @@ private:
     int m_compile_report;    ///< Print compilation report?
     bool m_use_optix;        ///< This is an OptiX-based renderer
     bool m_use_optix_cache;  ///< Renderer-enabled caching for OptiX ptx
+    /// Which GPU backend to compile for, if any. The source of truth that
+    /// use_optix() and the is_*_backend() predicates all read from.
+    GPUTargetDesc m_gpu_target;
     int m_max_optix_groupdata_alloc;  ///< Maximum OptiX groupdata buffer allocation
     bool m_buffer_printf;             ///< Buffer/batch printf output?
     bool m_no_noise;                  ///< Substitute trivial noise calls

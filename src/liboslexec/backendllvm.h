@@ -11,6 +11,7 @@
 using namespace OSL;
 using namespace OSL::pvt;
 
+#include <OSL/gpu_target_desc.h>
 #include <OSL/llvm_util.h>
 #include "runtimeoptimize.h"
 
@@ -69,8 +70,8 @@ public:
     /// Create an llvm function for group initialization code.
     llvm::Function* build_llvm_init();
 
-    // Create llvm functions for OptiX callables
-    std::vector<llvm::Function*> build_llvm_optix_callables();
+    // Create llvm functions for the GPU callables (init, entry layer, fused)
+    std::vector<llvm::Function*> build_llvm_gpu_callables();
     llvm::Function* build_llvm_fused_callable();
 
     /// Build up LLVM IR code for the given range [begin,end) or
@@ -453,8 +454,9 @@ public:
     {
         if (typespec.is_closure_based())
             return TypeDesc(TypeDesc::PTR, typespec.arraylength());
-        else if (use_optix() && typespec.is_string_based()) {
-            // On the OptiX side, we use the uint64 hash to represent a string
+        else if (is_gpu_backend() && typespec.is_string_based()) {
+            // Device code cannot hold a host ustring pointer, so every GPU
+            // backend represents a string as its uint64 hash.
             return TypeDesc(TypeDesc::UINT64, typespec.arraylength());
         } else
             return typespec.simpletype();
@@ -529,8 +531,43 @@ public:
         return m_const_map;
     }
 
+    /// Return the descriptor for the GPU target this group is compiled for.
+    const GPUTargetDesc& gpu_target() const { return m_gpu_target; }
+
+    /// Are we compiling for a GPU at all, rather than the CPU JIT? True for
+    /// every GPU backend, and the right predicate for behavior that any
+    /// device inherits regardless of vendor.
+    bool is_gpu_backend() const
+    {
+        return m_gpu_target.backend != GPUBackendKind::None;
+    }
+
+    /// Are we compiling for NVPTX specifically? Use this for genuine NVPTX
+    /// lowering and for OptiX ABI contracts, which AMD must not inherit.
+    bool is_nvptx_backend() const
+    {
+        return m_gpu_target.backend == GPUBackendKind::NVPTX;
+    }
+
+    /// Are we compiling for AMDGPU specifically?
+    bool is_amdgpu_backend() const
+    {
+        return m_gpu_target.backend == GPUBackendKind::AMDGPU;
+    }
+
+    /// Are we emitting a compiled artifact rather than JITing into this
+    /// process? This is a JIT-vs-AOT question, not a GPU one: it happens to
+    /// be true for exactly the GPU backends today, but the distinction
+    /// matters for the MCJIT-only machinery that keys off it.
+    bool emits_artifact() const
+    {
+        return m_gpu_target.artifact != GPUArtifactKind::None;
+    }
+
     /// Return whether or not we are compiling for an OptiX-based renderer.
-    bool use_optix() { return m_use_optix; }
+    /// Compatibility wrapper over the target descriptor, kept while the
+    /// remaining branch sites are migrated onto the predicates above.
+    bool use_optix() { return is_nvptx_backend(); }
     bool use_optix_cache() { return shadingsys().use_optix_cache(); }
 
     /// Return if we should compile against free function versions of Renderer Service.
@@ -602,7 +639,7 @@ private:
     // Name of each indexed field in the groupdata, mostly for debugging.
     std::vector<std::string> m_groupdata_field_names;
 
-    bool m_use_optix;  ///< Compile for OptiX?
+    GPUTargetDesc m_gpu_target;  ///< Which GPU backend to compile for, if any
     bool m_use_rs_bitcode;  /// To use free function versions of Renderer Service functions.
 
     friend class ShadingSystemImpl;
