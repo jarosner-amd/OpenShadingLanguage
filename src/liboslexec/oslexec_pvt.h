@@ -83,11 +83,15 @@ struct PerThreadInfo {
 
 namespace pvt {
 
+/// Unpack a cached PTX blob. `groupdata_alignment` is set to 0 if the blob
+/// predates alignment being recorded, since a cache hit skips the backend
+/// that would otherwise compute it and there is nothing to fall back on.
 void
 optix_cache_unwrap(string_view cache_value, std::string& ptx,
-                   size_t& groupdata_size);
+                   size_t& groupdata_size, size_t& groupdata_alignment);
 std::string
-optix_cache_wrap(string_view ptx, size_t groupdata_size);
+optix_cache_wrap(string_view ptx, size_t groupdata_size,
+                 size_t groupdata_alignment);
 
 // forward definitions
 class ShadingSystemImpl;
@@ -1863,6 +1867,61 @@ public:
     size_t llvm_groupdata_size() const { return m_llvm_groupdata_size; }
     void llvm_groupdata_size(size_t size) { m_llvm_groupdata_size = size; }
 
+    /// Alignment the groupdata block requires, in bytes -- the widest
+    /// alignment of any field in it -- or 0 if it has not been computed.
+    /// A device-side allocator needs this alongside the size; host
+    /// allocation gets it for free from new/malloc, which is why nothing
+    /// tracked it before.
+    size_t llvm_groupdata_alignment() const
+    {
+        return m_llvm_groupdata_alignment;
+    }
+    void llvm_groupdata_alignment(size_t align)
+    {
+        m_llvm_groupdata_alignment = align;
+    }
+
+    /// Compiled GPU artifacts for this group, one per target architecture.
+    /// Replaces the single PTX string that predated multi-backend support.
+    const std::vector<CompiledGPUArtifact>& compiled_gpu_artifacts() const
+    {
+        return m_compiled_gpu_artifacts;
+    }
+
+    /// The first artifact matching this backend and artifact kind, or
+    /// nullptr if the group has none.
+    const CompiledGPUArtifact* find_gpu_artifact(GPUBackendKind backend,
+                                                 GPUArtifactKind kind) const
+    {
+        for (const CompiledGPUArtifact& a : m_compiled_gpu_artifacts)
+            if (a.backend == backend && a.artifact == kind)
+                return &a;
+        return nullptr;
+    }
+
+    /// Payload of the first NVPTX PTX artifact as text, empty if there is
+    /// none. Backs the legacy "ptx_compiled_version" getattribute, which
+    /// predates the artifact container and must keep working.
+    std::string ptx_compiled_version() const
+    {
+        const CompiledGPUArtifact* a = find_gpu_artifact(GPUBackendKind::NVPTX,
+                                                         GPUArtifactKind::PTX);
+        return a ? std::string(a->payload.begin(), a->payload.end())
+                 : std::string();
+    }
+
+    /// Store `ptx` as this group's sole NVPTX PTX artifact. Used by the PTX
+    /// emission path and when restoring a group from the artifact cache.
+    void set_ptx_compiled_version(string_view ptx)
+    {
+        CompiledGPUArtifact a;
+        a.backend  = GPUBackendKind::NVPTX;
+        a.artifact = GPUArtifactKind::PTX;
+        a.payload.assign(ptx.begin(), ptx.end());
+        m_compiled_gpu_artifacts.clear();
+        m_compiled_gpu_artifacts.push_back(std::move(a));
+    }
+
     size_t llvm_groupdata_wide_size() const
     {
         return m_llvm_groupdata_wide_size;
@@ -2132,6 +2191,11 @@ private:
     volatile int m_batch_jitted
         = 0;  ///< Is it already jitted for batch execution?
     size_t m_llvm_groupdata_size = 0;  ///< Heap size needed for its groupdata
+    /// Alignment the groupdata block needs, in bytes, or 0 if it has not
+    /// been computed. Only a device-side allocator has to honor it
+    /// explicitly. 0 rather than 1 as the default deliberately: 1 is a
+    /// legitimate alignment, so it cannot also mean "unknown".
+    size_t m_llvm_groupdata_alignment = 0;
     size_t m_llvm_groupdata_wide_size
         = 0;                     ///< Heap size needed for its wide groupdata
     int m_id;                    ///< Unique ID for the group
@@ -2183,8 +2247,9 @@ private:
 
     std::string m_optix_cache_key;
 
-    // PTX assembly for compiled ShaderGroup
-    std::string m_llvm_ptx_compiled_version;
+    // Compiled GPU artifacts, one per target architecture. Empty on the CPU
+    // path. Replaces the single PTX string this used to be.
+    std::vector<CompiledGPUArtifact> m_compiled_gpu_artifacts;
 
     ParamValueList m_pending_params;          // Pending Parameter() values
     std::vector<ParamHints> m_pending_hints;  // ParamHints of pending params
