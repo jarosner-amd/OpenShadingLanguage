@@ -772,8 +772,9 @@ LLVM_Util::debug_push_inlined_function(OIIO::ustring function_name,
 
     OSL_ASSERT(getCurrentDebugScope());
 
-    llvm::DINode::DIFlags fnFlags = (llvm::DINode::DIFlags)(
-        llvm::DINode::FlagPrototyped | llvm::DINode::FlagNoReturn);
+    llvm::DINode::DIFlags fnFlags
+        = (llvm::DINode::DIFlags)(llvm::DINode::FlagPrototyped
+                                  | llvm::DINode::FlagNoReturn);
     llvm::DISubprogram* function = nullptr;
     function                     = m_llvm_debug_builder->createFunction(
         mDebugCU,               // Scope
@@ -781,14 +782,14 @@ LLVM_Util::debug_push_inlined_function(OIIO::ustring function_name,
         // We are inlined function so not sure supplying a linkage name
         // makes sense
         /*function_name.c_str()*/ llvm::StringRef(),  // Linkage Name
-        file,                                   // File
-        static_cast<unsigned int>(sourceline),  // Line Number
-        mSubTypeForInlinedFunction,  // subroutine type
-        method_scope_line,           // Scope Line,
+        file,                                         // File
+        static_cast<unsigned int>(sourceline),        // Line Number
+        mSubTypeForInlinedFunction,                   // subroutine type
+        method_scope_line,                            // Scope Line,
         fnFlags,
         llvm::DISubprogram::toSPFlags(true /*isLocalToUnit*/,
-                                                          true /*isDefinition*/,
-                                                          true /*false*/ /*isOptimized*/));
+                                      true /*isDefinition*/,
+                                      true /*false*/ /*isOptimized*/));
 
     mLexicalBlocks.push_back(function);
 }
@@ -1640,8 +1641,10 @@ LLVM_Util::make_jit_execengine(std::string* err, TargetISA requestedISA,
         OSL_ASSERT(m_llvm_module != nullptr);
         OSL_DEV_ONLY(std::cout << "debugging symbols" << std::endl);
 
-        module()->addModuleFlag(llvm::Module::Error, "Debug Info Version",
-                                llvm::DEBUG_METADATA_VERSION);
+        // Clang may already emit this flag in the shadeops bitcode.
+        if (!module()->getModuleFlag("Debug Info Version"))
+            module()->addModuleFlag(llvm::Module::Error, "Debug Info Version",
+                                    llvm::DEBUG_METADATA_VERSION);
 
         OSL_MAYBE_UNUSED unsigned int modulesDebugInfoVersion = 0;
         if (auto* Val = llvm::mdconst::dyn_extract_or_null<llvm::ConstantInt>(
@@ -1862,7 +1865,8 @@ LLVM_Util::nvptx_target_machine()
 #else
             ModuleTriple.str(),
 #endif
-            CUDA_TARGET_ARCH, "+ptx50", options, llvm::Reloc::Static,
+            // LLVM sets the PTX ISA version based on the CUDA_TARGET_ARCH
+            CUDA_TARGET_ARCH, "", options, llvm::Reloc::Static,
             llvm::CodeModel::Small,
 #if OSL_LLVM_VERSION >= 180
             llvm::CodeGenOptLevel::Default
@@ -2579,6 +2583,8 @@ LLVM_Util::prune_and_internalize_module(
             // keep any globals whose mangled name contains the rti_internal
             // substring.
             if (!anyMaterializedUses(global)
+                && global.getName() != "llvm.used"
+                && global.getName() != "llvm.compiler.used"
                 && (global.getName().find("rti_internal_")
                     == llvm::StringRef::npos)) {
                 unneeded_globals.push_back(&global);
@@ -4238,10 +4244,11 @@ llvm::Value*
 LLVM_Util::op_linearize_8x_indices(llvm::Value* wide_index)
 {
     llvm::Value* strided_indices = op_mul(wide_index, wide_constant(8, 8));
-    llvm::Constant* offsets_to_lane[8]
-        = { constant(0), constant(1), constant(2), constant(3),
-            constant(4), constant(5), constant(6), constant(7) };
-    llvm::Value* const_vec_offsets = llvm::ConstantVector::get(
+    llvm::Constant* offsets_to_lane[8] = { constant(0), constant(1),
+                                           constant(2), constant(3),
+                                           constant(4), constant(5),
+                                           constant(6), constant(7) };
+    llvm::Value* const_vec_offsets     = llvm::ConstantVector::get(
         llvm::ArrayRef<llvm::Constant*>(&offsets_to_lane[0], 8));
 
     return op_add(strided_indices, const_vec_offsets);
@@ -4517,9 +4524,9 @@ LLVM_Util::op_gather(llvm::Type* src_type, llvm::Value* src_ptr,
                 llvm::Value* gather1 = builder().CreateCall(func_avx2_gather_ps,
                                                             toArrayRef(args));
                 args[2]              = w8_int_indices[1];
-                args[3]              = builder().CreateBitCast(w8_int_masks[1],
-                                                               llvm_vector_type(type_float(),
-                                                                                8));
+                args[3] = builder().CreateBitCast(w8_int_masks[1],
+                                                  llvm_vector_type(type_float(),
+                                                                   8));
                 llvm::Value* gather2 = builder().CreateCall(func_avx2_gather_ps,
                                                             toArrayRef(args));
                 return op_combine_8x_vectors(gather1, gather2);
@@ -4566,9 +4573,10 @@ LLVM_Util::op_gather(llvm::Type* src_type, llvm::Value* src_ptr,
 
                 llvm::Value* unmasked_value
                     = builder().CreateVectorSplat(8, constant64((uint64_t)0));
-                llvm::Value* args[]
-                    = { unmasked_value, void_ptr(src_ptr), w8_int_indices[0],
-                        mask_as_int8(w8_bit_masks[0]), constant(8) };
+                llvm::Value* args[] = { unmasked_value, void_ptr(src_ptr),
+                                        w8_int_indices[0],
+                                        mask_as_int8(w8_bit_masks[0]),
+                                        constant(8) };
                 llvm::Value* gather1
                     = builder().CreateCall(func_avx512_gather_dpq,
                                            toArrayRef(args));
@@ -4594,9 +4602,10 @@ LLVM_Util::op_gather(llvm::Type* src_type, llvm::Value* src_ptr,
 
                 llvm::Value* unmasked_value
                     = builder().CreateVectorSplat(4, constant64((uint64_t)0));
-                llvm::Value* args[]
-                    = { unmasked_value, void_ptr(src_ptr), w4_int_indices[0],
-                        mask4_as_int8(w4_bit_masks[0]), constant(8) };
+                llvm::Value* args[] = { unmasked_value, void_ptr(src_ptr),
+                                        w4_int_indices[0],
+                                        mask4_as_int8(w4_bit_masks[0]),
+                                        constant(8) };
                 llvm::Value* gather1
                     = builder().CreateCall(func_avx512_gather_dpq,
                                            toArrayRef(args));
@@ -4621,9 +4630,10 @@ LLVM_Util::op_gather(llvm::Type* src_type, llvm::Value* src_ptr,
 
                 llvm::Value* unmasked_value
                     = builder().CreateVectorSplat(4, constant64((uint64_t)0));
-                llvm::Value* args[]
-                    = { unmasked_value, void_ptr(src_ptr), w4_int_indices,
-                        mask4_as_int8(w4_bit_masks), constant(4) };
+                llvm::Value* args[] = { unmasked_value, void_ptr(src_ptr),
+                                        w4_int_indices,
+                                        mask4_as_int8(w4_bit_masks),
+                                        constant(4) };
                 llvm::Value* gather1
                     = builder().CreateCall(func_avx512_gather_dpq,
                                            toArrayRef(args));
@@ -4706,9 +4716,9 @@ LLVM_Util::op_gather(llvm::Type* src_type, llvm::Value* src_ptr,
                 llvm::Value* gather1 = builder().CreateCall(func_avx2_gather_ps,
                                                             toArrayRef(args));
                 args[2]              = w8_int_indices[1];
-                args[3]              = builder().CreateBitCast(w8_int_masks[1],
-                                                               llvm_vector_type(type_float(),
-                                                                                8));
+                args[3] = builder().CreateBitCast(w8_int_masks[1],
+                                                  llvm_vector_type(type_float(),
+                                                                   8));
                 llvm::Value* gather2 = builder().CreateCall(func_avx2_gather_ps,
                                                             toArrayRef(args));
                 return op_combine_8x_vectors(gather1, gather2);
@@ -4878,9 +4888,10 @@ LLVM_Util::op_gather(llvm::Type* src_type, llvm::Value* src_ptr,
 
                 llvm::Value* unmasked_value
                     = builder().CreateVectorSplat(8, constant64((uint64_t)0));
-                llvm::Value* args[]
-                    = { unmasked_value, void_ptr(src_ptr), w8_int_indices[0],
-                        mask_as_int8(w8_bit_masks[0]), constant(8) };
+                llvm::Value* args[] = { unmasked_value, void_ptr(src_ptr),
+                                        w8_int_indices[0],
+                                        mask_as_int8(w8_bit_masks[0]),
+                                        constant(8) };
                 llvm::Value* gather1
                     = builder().CreateCall(func_avx512_gather_dpq,
                                            toArrayRef(args));
@@ -4918,9 +4929,10 @@ LLVM_Util::op_gather(llvm::Type* src_type, llvm::Value* src_ptr,
 
                 llvm::Value* unmasked_value
                     = builder().CreateVectorSplat(4, constant64((uint64_t)0));
-                llvm::Value* args[]
-                    = { unmasked_value, void_ptr(src_ptr), w4_int_indices[0],
-                        mask4_as_int8(w4_bit_masks[0]), constant(8) };
+                llvm::Value* args[] = { unmasked_value, void_ptr(src_ptr),
+                                        w4_int_indices[0],
+                                        mask4_as_int8(w4_bit_masks[0]),
+                                        constant(8) };
                 llvm::Value* gather1
                     = builder().CreateCall(func_avx512_gather_dpq,
                                            toArrayRef(args));
@@ -5107,9 +5119,10 @@ LLVM_Util::op_scatter(llvm::Value* wide_val, llvm::Type* src_type,
                           builder().CreatePtrToInt(w8_string_vals[1],
                                                    w8_address_int) } };
 
-                llvm::Value* args[]
-                    = { void_ptr(src_ptr), mask_as_int8(w8_bit_masks[0]),
-                        w8_int_indices[0], w8_address_int_val[0], constant(8) };
+                llvm::Value* args[] = { void_ptr(src_ptr),
+                                        mask_as_int8(w8_bit_masks[0]),
+                                        w8_int_indices[0],
+                                        w8_address_int_val[0], constant(8) };
                 builder().CreateCall(func_avx512_scatter_dpq, toArrayRef(args));
                 args[1] = mask_as_int8(w8_bit_masks[1]);
                 args[2] = w8_int_indices[1];
@@ -5130,9 +5143,10 @@ LLVM_Util::op_scatter(llvm::Value* wide_val, llvm::Type* src_type,
                 llvm::Value* address_int_val
                     = builder().CreatePtrToInt(wide_val, wide_address_int_type);
 
-                llvm::Value* args[]
-                    = { void_ptr(src_ptr), mask_as_int8(current_mask()),
-                        linear_indices, address_int_val, constant(8) };
+                llvm::Value* args[] = { void_ptr(src_ptr),
+                                        mask_as_int8(current_mask()),
+                                        linear_indices, address_int_val,
+                                        constant(8) };
                 builder().CreateCall(func_avx512_scatter_dpq, toArrayRef(args));
                 return;
             }
@@ -5149,9 +5163,10 @@ LLVM_Util::op_scatter(llvm::Value* wide_val, llvm::Type* src_type,
                 llvm::Value* address_int_val
                     = builder().CreatePtrToInt(wide_val, wide_address_int_type);
 
-                llvm::Value* args[]
-                    = { void_ptr(src_ptr), mask_as_int8(current_mask()),
-                        linear_indices, address_int_val, constant(4) };
+                llvm::Value* args[] = { void_ptr(src_ptr),
+                                        mask_as_int8(current_mask()),
+                                        linear_indices, address_int_val,
+                                        constant(4) };
                 builder().CreateCall(func_avx512_scatter_dpq, toArrayRef(args));
                 return;
             }
@@ -5296,9 +5311,10 @@ LLVM_Util::op_scatter(llvm::Value* wide_val, llvm::Type* src_type,
                           builder().CreatePtrToInt(w8_string_vals[1],
                                                    w8_address_int) } };
 
-                llvm::Value* args[]
-                    = { void_ptr(src_ptr), mask_as_int8(w8_bit_masks[0]),
-                        w8_int_indices[0], w8_address_int_val[0], constant(8) };
+                llvm::Value* args[] = { void_ptr(src_ptr),
+                                        mask_as_int8(w8_bit_masks[0]),
+                                        w8_int_indices[0],
+                                        w8_address_int_val[0], constant(8) };
                 builder().CreateCall(func_avx512_scatter_dpq, toArrayRef(args));
                 args[1] = mask_as_int8(w8_bit_masks[1]);
                 args[2] = w8_int_indices[1];
@@ -5320,9 +5336,10 @@ LLVM_Util::op_scatter(llvm::Value* wide_val, llvm::Type* src_type,
                 llvm::Value* address_int_val
                     = builder().CreatePtrToInt(wide_val, wide_address_int_type);
 
-                llvm::Value* args[]
-                    = { void_ptr(src_ptr), mask_as_int8(current_mask()),
-                        linear_indices, address_int_val, constant(8) };
+                llvm::Value* args[] = { void_ptr(src_ptr),
+                                        mask_as_int8(current_mask()),
+                                        linear_indices, address_int_val,
+                                        constant(8) };
                 builder().CreateCall(func_avx512_scatter_dpq, toArrayRef(args));
                 return;
             }
@@ -5340,9 +5357,10 @@ LLVM_Util::op_scatter(llvm::Value* wide_val, llvm::Type* src_type,
                 llvm::Value* address_int_val
                     = builder().CreatePtrToInt(wide_val, wide_address_int_type);
 
-                llvm::Value* args[]
-                    = { void_ptr(src_ptr), mask_as_int8(current_mask()),
-                        linear_indices, address_int_val, constant(4) };
+                llvm::Value* args[] = { void_ptr(src_ptr),
+                                        mask_as_int8(current_mask()),
+                                        linear_indices, address_int_val,
+                                        constant(4) };
                 builder().CreateCall(func_avx512_scatter_dpq, toArrayRef(args));
                 return;
             }
@@ -5794,7 +5812,17 @@ LLVM_Util::op_store(llvm::Value* val, llvm::Value* ptr)
     // Something bad might happen, and we think it is worth leaving checks.
     // NOTE: this is no longer as useful with opaque pointers, we can only
     // check that ptr is a pointer.
-    if (ptr->getType() != type_ptr(val->getType())) {
+    const auto* ptr_type = llvm::dyn_cast<llvm::PointerType>(ptr->getType());
+#if OSL_LLVM_VERSION >= 210
+    const bool compatible = ptr_type != nullptr;
+#else
+    const bool compatible
+        = ptr_type
+          && ptr_type
+                 == llvm::PointerType::get(val->getType(),
+                                           ptr_type->getAddressSpace());
+#endif
+    if (!compatible) {
         std::cerr << "We have a type mismatch! op_store ptr->getType()="
                   << std::flush;
         ptr->getType()->print(llvm::errs());
@@ -5853,6 +5881,15 @@ void
 LLVM_Util::op_unmasked_store(llvm::Value* val, llvm::Value* ptr)
 {
     builder().CreateStore(val, ptr);
+}
+
+
+
+void
+LLVM_Util::op_unmasked_store(llvm::Value* val, llvm::Value* ptr,
+                            unsigned alignment)
+{
+    builder().CreateAlignedStore(val, ptr, llvm::Align(alignment));
 }
 
 
@@ -6206,14 +6243,14 @@ LLVM_Util::op_zero_if(llvm::Value* cond, llvm::Value* v)
                || v->getType() == type_wide_int()
                || v->getType() == type_float() || v->getType() == type_int());
 
-    bool is_wide = v->getType() == type_wide_float()
-                   || v->getType() == type_wide_int();
-    bool is_float = v->getType() == type_float()
-                    || v->getType() == type_wide_float();
-    llvm::Value* c_zero = (is_wide)    ? (is_float)
-                                             ? wide_constant(0.0f)
-                                             : wide_constant(static_cast<int>(0))
-                             : (is_float) ? constant(0.0f)
+    bool is_wide        = v->getType() == type_wide_float()
+                          || v->getType() == type_wide_int();
+    bool is_float       = v->getType() == type_float()
+                          || v->getType() == type_wide_float();
+    llvm::Value* c_zero = (is_wide) ? (is_float)
+                                          ? wide_constant(0.0f)
+                                          : wide_constant(static_cast<int>(0))
+                          : (is_float) ? constant(0.0f)
                                        : constant(static_cast<int>(0));
 
     if (is_wide && m_supports_avx512f
@@ -6242,9 +6279,9 @@ LLVM_Util::op_zero_if(llvm::Value* cond, llvm::Value* v)
             llvm::Value* args[] = { int_v, int_v, int_v, a_identity_mask };
             llvm::Value* identity_call = builder().CreateCall(func,
                                                               toArrayRef(args));
-            v                          = is_float
-                                             ? builder().CreateBitCast(identity_call, type_wide_float())
-                                             : identity_call;
+            v = is_float
+                    ? builder().CreateBitCast(identity_call, type_wide_float())
+                    : identity_call;
         }
     }
     return op_select(cond, c_zero, v);

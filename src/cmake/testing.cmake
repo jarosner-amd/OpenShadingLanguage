@@ -19,6 +19,44 @@ add_custom_target ( CopyFiles ALL DEPENDS "${CMAKE_BINARY_DIR}/testsuite/runtest
 
 set (OSL_TEST_BIG_TIMEOUT 800 CACHE STRING "Timeout for tests that take a long time")
 
+if (BUILD_TESTING)
+    add_test (NAME hart-reference-selection
+        COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/testsuite/cmake-hart/check-references.py")
+    add_test (NAME cmake-hart-discovery
+        COMMAND "${CMAKE_COMMAND}"
+            "-DOSL_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+            "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/testsuite/cmake-hart"
+            -P "${PROJECT_SOURCE_DIR}/testsuite/cmake-hart/run.cmake")
+    if (OSL_USE_OPTIX AND USE_LLVM_BITCODE)
+        add_subdirectory ("${PROJECT_SOURCE_DIR}/testsuite/cuda-bitcode-link"
+                          "${CMAKE_BINARY_DIR}/testsuite/cuda-bitcode-link")
+    endif ()
+endif ()
+
+
+# Build a single "PYTHONPATH=..." entry suitable for a CTest ENVIRONMENT
+# property, putting prefix_dir first.
+#
+# This is how the python tests find the module: which binding backend a given
+# test run exercises is decided entirely by which directory this points at.
+# (It also means `ctest` run directly in the build tree works -- previously
+# PYTHONPATH was only ever set by the `make test` wrapper.)
+#
+# On Windows, deliberately don't append the inherited PYTHONPATH: entries are
+# separated by ';' there, which CMake would then split as a list separator
+# when this is used as a test ENVIRONMENT entry.
+function (osl_tests_pythonpath_env_entry out_var prefix_dir)
+    if (WIN32)
+        set (_pythonpath "${prefix_dir}")
+    elseif (DEFINED ENV{PYTHONPATH} AND NOT "$ENV{PYTHONPATH}" STREQUAL "")
+        set (_pythonpath "${prefix_dir}:$ENV{PYTHONPATH}")
+    else ()
+        set (_pythonpath "${prefix_dir}")
+    endif ()
+    set (${out_var} "PYTHONPATH=${_pythonpath}" PARENT_SCOPE)
+endfunction ()
+
 
 # add_one_testsuite() - set up one testsuite entry
 #
@@ -97,7 +135,8 @@ macro (add_one_testsuite testname testsrcdir)
         set_tests_properties (${testname} PROPERTIES LABELS noise
                               PROCESSORS 2 COST 4)
     endif ()
-    if (${testname} MATCHES "optix")
+    if (${testname} MATCHES "optix"
+        AND NOT "${testname}" MATCHES "\\.hart($|\\.)")
         set_tests_properties (${testname} PROPERTIES LABELS optix)
         if ("${CUDA_VERSION}" VERSION_GREATER_EQUAL "10.0")
             # Make sure libnvrtc-builtins.so is reachable
@@ -112,6 +151,11 @@ macro (add_one_testsuite testname testsrcdir)
         # long, so give them a higher cost and timeout.
         set_tests_properties (${testname} PROPERTIES LABELS batchregression
                               COST 15 TIMEOUT ${OSL_TEST_BIG_TIMEOUT})
+    endif ()
+    if ("${testname}" MATCHES "\\.hart($|\\.)")
+        set_property (TEST ${testname} APPEND PROPERTY LABELS hart gpu)
+        set_tests_properties (${testname} PROPERTIES RUN_SERIAL TRUE
+                              TIMEOUT ${OSL_TEST_BIG_TIMEOUT})
     endif ()
 endmacro ()
 
@@ -209,6 +253,31 @@ macro ( TESTSUITE )
               add_one_testsuite ("${_testname}.optix.fused" "${_testsrcdir}"
                                  ENV TESTSHADE_OPT=2 TESTSHADE_OPTIX=1 TESTSHADE_FUSED=1 )
             endif()
+        endif ()
+
+        # HART GPU tests require both an explicit configure-time opt-in and a
+        # marker. Reuse the fixture's commands and references without runtime
+        # skips or OptiX-specific comparison thresholds.
+        if (OSL_USE_HART AND USE_LLVM_BITCODE
+            AND "$ENV{TESTSUITE_HART}" STREQUAL "1"
+            AND EXISTS "${_testsrcdir}/HART")
+            # Preserve the original GPU optimized-only fixture restrictions.
+            if (NOT EXISTS "${_testsrcdir}/OPTIMIZEONLY"
+                AND NOT EXISTS "${_testsrcdir}/OPTIX_OPTIMIZEONLY")
+                add_one_testsuite ("${_testname}.hart" "${_testsrcdir}"
+                                   ENV TESTSHADE_HART=1 TESTSHADE_OPT=0
+                                       TESTSHADE_LLVM_OPT=10 TESTSHADE_FUSED=0)
+            endif ()
+            if (NOT EXISTS "${_testsrcdir}/NOOPTIMIZE")
+                add_one_testsuite ("${_testname}.hart.opt" "${_testsrcdir}"
+                                   ENV TESTSHADE_HART=1 TESTSHADE_OPT=2
+                                       TESTSHADE_LLVM_OPT=3 TESTSHADE_FUSED=0)
+                if (NOT EXISTS "${_testsrcdir}/NOFUSED")
+                    add_one_testsuite ("${_testname}.hart.fused" "${_testsrcdir}"
+                                       ENV TESTSHADE_HART=1 TESTSHADE_OPT=2
+                                           TESTSHADE_LLVM_OPT=3 TESTSHADE_FUSED=1)
+                endif ()
+            endif ()
         endif ()
 
         if (OSL_BUILD_BATCHED)
@@ -431,6 +500,7 @@ macro (osl_add_all_tests)
                 render-mx-medium-vdf
                 render-mx-medium-vdf-glass
                 render-microfacet render-oren-nayar
+                render-shaderball
                 render-spi-thinlayer
                 render-uv render-veachmis render-ward
                 render-raytypes
@@ -440,7 +510,7 @@ macro (osl_add_all_tests)
                 splineinverse-knots-ascend-reg splineinverse-knots-descend-reg
                 spline-boundarybug spline-derivbug
                 split-reg
-                string string-reg
+                string string-empty-compare string-reg
                 struct struct-array struct-array-mixture
                 struct-err struct-init-copy
                 struct-isomorphic-overload struct-layers
@@ -481,8 +551,42 @@ macro (osl_add_all_tests)
     # We also exclude these tests if this is a sanitizer build, because the
     # Python interpreter itself won't be linked with the right asan
     # libraries to run correctly.
+    #
+    # These go through add_one_testsuite directly rather than TESTSUITE(),
+    # because they need a per-variant PYTHONPATH (which is the *only* thing
+    # that selects which binding backend a run exercises), and because none of
+    # the variants TESTSUITE() generates -- optimized, batched, rs_bitcode,
+    # optix -- mean anything for a test that never executes a shader.
     if (USE_PYTHON AND Python3_Development_FOUND AND NOT SANITIZE)
-        TESTSUITE ( python-oslquery )
+        set (_py_testsrc "${CMAKE_SOURCE_DIR}/testsuite/python-oslquery")
+        osl_tests_pythonpath_env_entry (_pybind_pypath
+                                        "${CMAKE_BINARY_DIR}/lib/python/site-packages")
+        if (OSL_PYTHON_BINDINGS_BACKEND STREQUAL "both")
+            # In "both" mode the nanobind module is kept in its own build-tree
+            # package so it doesn't shadow the pybind11 one, which owns
+            # lib/python/site-packages.
+            osl_tests_pythonpath_env_entry (_nb_pypath
+                                            "${CMAKE_BINARY_DIR}/lib/python/nanobind")
+        else ()
+            # nanobind-only builds put the module exactly where pybind11
+            # would have, so the same path serves.
+            set (_nb_pypath "${_pybind_pypath}")
+        endif ()
+
+        set (_nb_suffix ".nanobind")
+        if (OSL_BUILD_PYTHON_PYBIND11)
+            add_one_testsuite ("python-oslquery" "${_py_testsrc}"
+                               ENV TESTSHADE_OPT=0 "${_pybind_pypath}")
+        else ()
+            # Whichever backend is the only one built gets the plain test
+            # name; the suffix exists to disambiguate, so with nothing to
+            # disambiguate from it would just be noise.
+            set (_nb_suffix "")
+        endif ()
+        if (OSL_BUILD_PYTHON_NANOBIND)
+            add_one_testsuite ("python-oslquery${_nb_suffix}" "${_py_testsrc}"
+                               ENV TESTSHADE_OPT=0 "${_nb_pypath}")
+        endif ()
     endif ()
 
     # Only run openvdb-related tests if the local OIIO has openvdb support.

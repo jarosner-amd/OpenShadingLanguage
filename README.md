@@ -12,6 +12,21 @@
 [![Documentation Status](https://readthedocs.org/projects/open-shading-language/badge/?version=main)](https://open-shading-language.readthedocs.io/en/main/?badge=main)
 
 
+Contents
+--------
+
+* [Introduction](#introduction)
+* [How OSL is different](#how-osl-is-different)
+* [What OSL consists of](#what-osl-consists-of)
+* [Where OSL has been used](#where-osl-has-been-used)
+* [👷 Building and Installation](#-building-and-installation)
+* [💁 Documentation](#-documentation)
+* [🚑 Contact & reporting problems](#-contact--reporting-problems)
+* [🔧 Contributing and developer documentation](#-contributing-and-developer-documentation)
+* [☎️ Communications channels and additional resources](#️-communications-channels-and-additional-resources)
+* [Credits](#credits)
+
+
 Introduction
 ------------
 
@@ -471,6 +486,7 @@ nominated for major awards.)
   Toy Story 5,
   Minions & Monsters,
   Spider-Man: Brand New Day,
+  Forgotten Island,
   ...
 
 
@@ -496,6 +512,10 @@ which use RenderMan<sup>&reg;</sup> in the examples but which are primarily abou
 
 There is also the [Shader Writing in Open Shading Language book](https://www.routledge.com/Shader-Writing-in-Open-Shading-Language-with-RenderManr-Examples/Prater/p/book/9781032421100).
 This covers all the material from the Siggraph course but in far greater detail. It also includes much more information about how OSL operates and covers a much broader range of shader examples.
+
+For those interested in integrating OSL into a renderer, [OSL in RTIOW](https://github.com/jinhgkim/Path-Tracer)
+is a small example that extends the path tracer from
+[Ray Tracing in One Weekend](https://raytracing.github.io/) with OSL shading.
 
 
 🚑 Contact & reporting problems
@@ -569,16 +589,16 @@ Many people have contributed features, bug fixes, and other changes to OSL
 over the years: Steve Agland, Shane Ambler, Martijn Berger, Farchad
 Bidgolirad, Alexandru Biscoveanu, Nicholas Bishop, Curtis Black, Rasmus
 Bonnedal, Solomon Boulos, Stefan Bruens, Stefan Büttner, Matthaus G. Chajdas,
-Clark Chen, Mehdi Chinoune, Alejandro Conty, Damien Courtois, Dieter De Baets,
-Thomas Dinges, Daniel Dresser, Mads Drøschler, Peter Ellerington, Luke Emrose,
+Clark Chen, Mehdi Chinoune, Alejandro Conty, Damien Courtois, Tomas Davidovic,
+Dieter De Baets, Thomas Dinges, Daniel Dresser, Mads Drøschler, Peter Ellerington, Luke Emrose,
 Louis Feng, Mark Final, Henri Fousse, Stephen Friedman, Syoyo Fujita, Alex
 Fuller, Tim Grant, Larry Gritz, Nicolas Guiard, Euan Haahr, Derek Haase,
 Sven-Hendrik Haase, John Haddon, Niklas Harrysson, Daniel Heckenberg, Chris
 Hellmuth, Christian Heusel, Adrien Herubel, Dan Horák, Thiago Ize, Matt
-Johnson, Ronan Keryell, Chris Kulla, Elvic Liang, Max Liani, Sv. Lockal, Silvia Lopez,
+Johnson, Ronan Keryell, Jinnie Kim, Chris Kulla, Elvic Liang, Max Liani, Sv. Lockal, Silvia Lopez,
 Adam Martinez, John Mertic, Bastien Montagne, Steena Monteiro, Patrick Mours,
 Alexis Oblet, Erich Ocean, Mikko Ohtamaa, Jean-Francois Panisset, Jino Park,
-Alexei Pawlow, Mitch Prater, Jay Reynolds, Declan Russell, Benoit Ruiz,
+Alexei Pawlow, Jonathan Peters, Mitch Prater, Jay Reynolds, Declan Russell, Benoit Ruiz,
 Patrick Scheibe, Alex Schworer, Jonathan Scruggs, Sergey Sharybin, Mark
 Sisson, Sandip Shukla, Alexey Smolenchuk, Cliff Stein, Stephan Steinbach, Taraash, Luya
 Tshimbalanga, Esteban Tovagliari, Brecht Van Lommel, Thibault Vergne,
