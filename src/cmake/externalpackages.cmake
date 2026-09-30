@@ -169,7 +169,12 @@ if (OSL_USE_OPTIX)
         endif ()
         # Is it really a good idea to completely reset CUDA_LIBRARIES here?
         set(CUDA_LIBRARIES ${cudart_lib})
-        set(CUDA_EXTRA_LIBS ${CUDA_EXTRA_LIBS} dl rt)
+        # libdl and librt are POSIX; they do not exist on Windows, where
+        # linking them fails with LNK1181. The OptiX CI job only runs in a
+        # Linux container, which is why this went unnoticed.
+        if (NOT WIN32)
+            set(CUDA_EXTRA_LIBS ${CUDA_EXTRA_LIBS} dl rt)
+        endif ()
         set (CMAKE_FIND_LIBRARY_SUFFIXES ${save_lib_path})
         unset (save_lib_path)
     endif()
