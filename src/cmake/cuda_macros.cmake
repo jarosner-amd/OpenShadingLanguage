@@ -170,6 +170,13 @@ function ( MAKE_CUDA_BITCODE src suffix generated_bc extra_clang_args )
             ${LLVM_COMPILE_FLAGS} ${CUDA_LIB_FLAGS} ${CLANG_MSVC_FIX} ${CUDA_TEXREF_FIX}
             -D__CUDACC__ -DOSL_COMPILING_TO_BITCODE=1 -DNDEBUG -DOIIO_NO_SSE -D__CUDADEVRT_INTERNAL__
             --language=cuda --cuda-device-only --cuda-gpu-arch=${CUDA_TARGET_ARCH}
+            # Each source here is compiled to device bitcode separately and the
+            # results are linked by llvm-link, which is relocatable device code
+            # by definition. Without -fgpu-rdc, a translation-unit-local
+            # __device__ global that any host code references is emitted with
+            # external linkage and the same mangled name in every object, so
+            # the link fails with "symbol multiply defined".
+            -fgpu-rdc
             -Wno-deprecated-register -Wno-format-security
             -fno-math-errno -ffast-math ${CUDA_OPT_FLAG_CLANG} ${CLANG_FTZ_FLAG} -S -emit-llvm ${extra_clang_args}
             ${src} -o ${asm_cuda}
