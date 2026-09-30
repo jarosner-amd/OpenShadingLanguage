@@ -23,6 +23,7 @@
 
 #if OSL_USE_OPTIX
 #    include <llvm/Linker/Linker.h>
+#    include <llvm/Target/TargetMachine.h>
 #endif
 
 // Create external declarations for all built-in funcs we may call from LLVM
@@ -2119,15 +2120,17 @@ BackendLLVM::run()
             // data layout is inherited from that, but if creating an empty
             // module like here, have to manually set those, otherwise
             // compiling will later fail because the NVPTX target is not found.
-            // The target triple and data layout used here are those specified
-            // for NVPTX (https://www.llvm.org/docs/NVPTXUsage.html#triples).
-            ll.module()->setDataLayout(
-                "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-i128:128:128-f32:32:32-f64:64:64-v16:16:16-v32:32:32-v64:64:64-v128:128:128-n16:32:64");
+            // The target triple used here is the one specified for NVPTX
+            // (https://www.llvm.org/docs/NVPTXUsage.html#triples). The triple
+            // must be set before the data layout, because the target machine
+            // is looked up by the module's triple.
 #        if OSL_LLVM_VERSION < 210
             ll.module()->setTargetTriple("nvptx64-nvidia-cuda");
 #        else
             ll.module()->setTargetTriple(llvm::Triple("nvptx64-nvidia-cuda"));
 #        endif
+            ll.module()->setDataLayout(
+                ll.nvptx_target_machine()->createDataLayout());
         }
 #    endif
 #else
@@ -2181,6 +2184,17 @@ BackendLLVM::run()
 
         } else {
 #    ifdef OSL_LLVM_CUDA_BITCODE
+            // Set the NVPTX triple on the main module up front. The data
+            // layouts below are taken from the target machine, and the target
+            // machine is looked up by the *current* module's triple -- so it
+            // has to be in place before the first such query, not only by the
+            // time the module is handed to codegen.
+#        if OSL_LLVM_VERSION < 210
+            ll.module()->setTargetTriple("nvptx64-nvidia-cuda");
+#        else
+            ll.module()->setTargetTriple(llvm::Triple("nvptx64-nvidia-cuda"));
+#        endif
+
             llvm::Module* shadeops_module = ll.module_from_bitcode(
                 (char*)shadeops_cuda_llvm_compiled_ops_block,
                 shadeops_cuda_llvm_compiled_ops_size, "llvm_ops", &err);
@@ -2190,14 +2204,14 @@ BackendLLVM::run()
                     "llvm::parseBitcodeFile returned '{}' for cuda llvm_ops\n",
                     err);
 
-            shadeops_module->setDataLayout(
-                "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-i128:128:128-f32:32:32-f64:64:64-v16:16:16-v32:32:32-v64:64:64-v128:128:128-n16:32:64");
 #        if OSL_LLVM_VERSION < 210
             shadeops_module->setTargetTriple("nvptx64-nvidia-cuda");
 #        else
             shadeops_module->setTargetTriple(
                 llvm::Triple("nvptx64-nvidia-cuda"));
 #        endif
+            shadeops_module->setDataLayout(
+                ll.nvptx_target_machine()->createDataLayout());
 
             std::unique_ptr<llvm::Module> shadeops_ptr(shadeops_module);
             llvm::Linker::linkModules(*ll.module(), std::move(shadeops_ptr),
@@ -2222,14 +2236,14 @@ BackendLLVM::run()
                         "llvm::parseBitcodeFile returned '{}' for cuda llvm_ops\n",
                         err);
 
-                rend_lib_module->setDataLayout(
-                    "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-i128:128:128-f32:32:32-f64:64:64-v16:16:16-v32:32:32-v64:64:64-v128:128:128-n16:32:64");
 #        if OSL_LLVM_VERSION < 210
                 rend_lib_module->setTargetTriple("nvptx64-nvidia-cuda");
 #        else
                 rend_lib_module->setTargetTriple(
                     llvm::Triple("nvptx64-nvidia-cuda"));
 #        endif
+                rend_lib_module->setDataLayout(
+                    ll.nvptx_target_machine()->createDataLayout());
 
                 for (llvm::Function& fn : *rend_lib_module) {
                     fn.addFnAttr("osl-rend_lib-function", "true");
@@ -2252,7 +2266,7 @@ BackendLLVM::run()
             ll.module()->setTargetTriple(llvm::Triple("nvptx64-nvidia-cuda"));
 #    endif
             ll.module()->setDataLayout(
-                "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-i128:128:128-f32:32:32-f64:64:64-v16:16:16-v32:32:32-v64:64:64-v128:128:128-n16:32:64");
+                ll.nvptx_target_machine()->createDataLayout());
 
             // Tag each function as an OSL library function to help with
             // inlining and optimization after codegen.
