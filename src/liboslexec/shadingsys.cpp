@@ -1061,6 +1061,24 @@ namespace Strings {
 namespace pvt {  // OSL::pvt
 
 
+// Build the GPU target descriptor from the renderer capabilities that
+// use_optix() and use_optix_cache() are already derived from, so the two
+// representations cannot disagree. OptiX is the only GPU backend wired up
+// today; the LLVM-level target fields stay empty until the emission path
+// starts consuming them.
+static GPUTargetDesc
+make_gpu_target_desc(bool use_optix, bool use_optix_cache)
+{
+    GPUTargetDesc desc;
+    if (use_optix) {
+        desc.backend      = GPUBackendKind::NVPTX;
+        desc.artifact     = GPUArtifactKind::PTX;
+        desc.enable_cache = use_optix_cache;
+    }
+    return desc;
+}
+
+
 ShadingSystemImpl::ShadingSystemImpl(RendererServices* renderer,
                                      TextureSystem* texturesystem,
                                      ErrorHandler* err)
@@ -1134,6 +1152,7 @@ ShadingSystemImpl::ShadingSystemImpl(RendererServices* renderer,
     , m_compile_report(0)
     , m_use_optix(renderer->supports("OptiX"))
     , m_use_optix_cache(m_use_optix && renderer->supports("optix_ptx_cache"))
+    , m_gpu_target(make_gpu_target_desc(m_use_optix, m_use_optix_cache))
     , m_max_optix_groupdata_alloc(0)
     , m_buffer_printf(true)
     , m_no_noise(false)
@@ -2168,6 +2187,76 @@ ShadingSystemImpl::attribute(ShaderGroup* group, string_view name,
 
 
 
+// Handle the indexed "gpu_artifact:<N>:<field>" getattribute family. Returns
+// false for a malformed name, an out-of-range index, an unknown field, or a
+// type mismatch, so the caller can fall through to its other attributes.
+//
+// Deliberately a copy protocol rather than handing out pointers into
+// ShaderGroup memory: query ":size" first, then ":data" with a buffer of at
+// least that many bytes.
+static bool
+get_gpu_artifact_attribute(const ShaderGroup* group, string_view name,
+                           TypeDesc type, void* val)
+{
+    string_view rest = name;
+    if (!OIIO::Strutil::parse_prefix(rest, "gpu_artifact:"))
+        return false;
+    int index = -1;
+    if (!OIIO::Strutil::parse_int(rest, index)
+        || !OIIO::Strutil::parse_prefix(rest, ":"))
+        return false;
+
+    const std::vector<CompiledGPUArtifact>& artifacts
+        = group->compiled_gpu_artifacts();
+    if (index < 0 || index >= (int)artifacts.size())
+        return false;
+    const CompiledGPUArtifact& art = artifacts[index];
+
+    if (rest == "backend" && type == TypeInt) {
+        *(int*)val = (int)art.backend;
+        return true;
+    }
+    if (rest == "kind" && type == TypeInt) {
+        *(int*)val = (int)art.artifact;
+        return true;
+    }
+    if (rest == "rdc" && type == TypeInt) {
+        *(int*)val = art.rdc ? 1 : 0;
+        return true;
+    }
+    if (rest == "num_exports" && type == TypeInt) {
+        *(int*)val = (int)art.exports.size();
+        return true;
+    }
+    if (rest == "size" && type == TypeInt) {
+        *(int*)val = (int)art.payload.size();
+        return true;
+    }
+    if (rest == "triple" && type.basetype == TypeDesc::STRING) {
+        *(ustring*)val = ustring(art.triple);
+        return true;
+    }
+    if (rest == "arch" && type.basetype == TypeDesc::STRING) {
+        *(ustring*)val = ustring(art.arch);
+        return true;
+    }
+    // Which LLVM produced the payload. Bitcode is backward but not forward
+    // compatible, so a consumer needs this to know whether it can read it.
+    if (rest == "llvm_version" && type.basetype == TypeDesc::STRING) {
+        *(ustring*)val = ustring(art.llvm_version);
+        return true;
+    }
+    if (rest == "data" && type.basetype == TypeDesc::UINT8) {
+        if (type.size() < art.payload.size())
+            return false;  // caller's buffer is too small
+        memcpy(val, art.payload.data(), art.payload.size());
+        return true;
+    }
+    return false;
+}
+
+
+
 bool
 ShadingSystemImpl::getattribute(ShaderGroup* group, string_view name,
                                 TypeDesc type, void* val)
@@ -2267,11 +2356,21 @@ ShadingSystemImpl::getattribute(ShaderGroup* group, string_view name,
         *(int*)val = group->stat_noise_ops();
         return true;
     }
+    // Compatibility alias: this predates the artifact container and returns
+    // the first NVPTX PTX artifact. New code should use the gpu_artifact:N:*
+    // family below, which is backend-neutral and copies rather than handing
+    // back a pointer into ShaderGroup memory.
     if (name == "ptx_compiled_version" && type.basetype == TypeDesc::PTR) {
-        bool exists        = !group->m_llvm_ptx_compiled_version.empty();
-        *(std::string*)val = exists ? group->m_llvm_ptx_compiled_version : "";
+        *(std::string*)val = group->ptx_compiled_version();
         return true;
     }
+    if (name == "gpu_num_artifacts" && type == TypeInt) {
+        *(int*)val = (int)group->compiled_gpu_artifacts().size();
+        return true;
+    }
+    if (OIIO::Strutil::starts_with(name, "gpu_artifact:")
+        && get_gpu_artifact_attribute(group, name, type, val))
+        return true;
     if (name == "interactive_params" && type.basetype == TypeDesc::PTR) {
         *(void**)val = group->m_interactive_arena.get();
         return true;
@@ -2407,6 +2506,17 @@ ShadingSystemImpl::getattribute(ShaderGroup* group, string_view name,
     }
     if (name == "llvm_groupdata_size" && type == TypeInt) {
         *(int*)val = (int)group->llvm_groupdata_size();
+        return true;
+    }
+    // Report unavailable rather than guessing. A group restored from a cache
+    // blob written before alignment was recorded never runs the backend that
+    // computes it, and returning a plausible-looking 1 there would be worse
+    // than admitting we do not know.
+    if (name == "llvm_groupdata_alignment" && type == TypeInt) {
+        size_t align = group->llvm_groupdata_alignment();
+        if (align == 0)
+            return false;
+        *(int*)val = (int)align;
         return true;
     }
 
@@ -3618,7 +3728,7 @@ ShadingSystemImpl::ReParameter(ShaderGroup& group, string_view layername_,
         if (memcmp(group.interactive_arena_ptr() + offset, payload, size)) {
             memcpy(group.interactive_arena_ptr() + offset, payload,
                    type.size());
-            if (use_optix())
+            if (is_gpu_backend())
                 renderer()->copy_to_device(
                     group.device_interactive_arena().d_get() + offset, payload,
                     type.size());
@@ -4056,9 +4166,11 @@ ShadingSystemImpl::optimize_group(ShaderGroup& group, ShadingContext* ctx,
             std::string cache_value;
             if (renderer()->cache_get("optix_ptx", cache_key, cache_value)) {
                 cached = true;
-                optix_cache_unwrap(cache_value,
-                                   group.m_llvm_ptx_compiled_version,
-                                   group.m_llvm_groupdata_size);
+                std::string ptx;
+                optix_cache_unwrap(cache_value, ptx,
+                                   group.m_llvm_groupdata_size,
+                                   group.m_llvm_groupdata_alignment);
+                group.set_ptx_compiled_version(ptx);
             }
         }
 
