@@ -6448,8 +6448,16 @@ LLVM_Util::absorb_module(
 }
 
 bool
-LLVM_Util::ptx_compile_group(llvm::Module*, const std::string& name,
+LLVM_Util::ptx_compile_group(llvm::Module* lib_module, const std::string& name,
                              std::string& out)
+{
+    return emit_nvptx_ptx(lib_module, out);
+}
+
+
+
+bool
+LLVM_Util::emit_nvptx_ptx(llvm::Module*, std::string& out)
 {
 #ifdef OSL_USE_OPTIX
     llvm::TargetMachine* target_machine = nvptx_target_machine();
@@ -6486,6 +6494,58 @@ LLVM_Util::ptx_compile_group(llvm::Module*, const std::string& name,
 #else
     return false;
 #endif
+}
+
+
+
+bool
+LLVM_Util::emit_amdgpu_bitcode(llvm::Module* module, std::string& out)
+{
+    if (!module)
+        return false;
+    llvm::raw_string_ostream stream(out);
+    llvm::WriteBitcodeToFile(*module, stream);
+    return true;
+}
+
+
+
+bool
+LLVM_Util::emit_amdgpu_ir(llvm::Module* module, std::string& out)
+{
+    if (!module)
+        return false;
+    llvm::raw_string_ostream stream(out);
+    module->print(stream, nullptr);
+    return true;
+}
+
+
+
+llvm::TargetMachine*
+LLVM_Util::target_machine_for(const GPUTargetDesc& desc)
+{
+    switch (desc.backend) {
+    case GPUBackendKind::NVPTX: return nvptx_target_machine();
+    default:
+        // AMDGPU's milestone-0 artifacts (LLVMBitcode, LLVMIR) are emitted
+        // straight from IR and need no real codegen TargetMachine.
+        return nullptr;
+    }
+}
+
+
+
+bool
+LLVM_Util::emit_gpu_artifact(const GPUTargetDesc& desc, llvm::Module* module,
+                             std::string& out)
+{
+    switch (desc.artifact) {
+    case GPUArtifactKind::PTX: return emit_nvptx_ptx(module, out);
+    case GPUArtifactKind::LLVMBitcode: return emit_amdgpu_bitcode(module, out);
+    case GPUArtifactKind::LLVMIR: return emit_amdgpu_ir(module, out);
+    default: return false;
+    }
 }
 
 

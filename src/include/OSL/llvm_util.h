@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <OSL/gpu_target_desc.h>
 #include <OSL/oslconfig.h>
 
 #include <unordered_set>
@@ -53,6 +54,12 @@ OSL_NAMESPACE_BEGIN
 namespace pvt {  // OSL::pvt
 
 
+// This enum conflates two different things: CPU JIT ISA selection (x64
+// through AVX512_noFMA, HOST) and GPU device backend identity (NVPTX,
+// AMDGCN). The two have nothing to do with each other -- a GPU backend has
+// no notion of SSE/AVX feature levels -- but they share this one enum
+// because NVPTX was added as a minimal extension rather than splitting it.
+// Should eventually be split into separate CPU-ISA and GPU-backend enums.
 enum class TargetISA {
     UNKNOWN,
     NONE,
@@ -65,6 +72,7 @@ enum class TargetISA {
     AVX512_noFMA,
     HOST,
     NVPTX,
+    AMDGCN,
     COUNT
 };
 
@@ -272,6 +280,13 @@ public:
     /// Return a pointer to the TargetMachine for NVPTX.  Create the TargetMachine
     /// if it has not yet been created.
     llvm::TargetMachine* nvptx_target_machine();
+
+    /// Return the TargetMachine for the backend named by desc, creating it
+    /// if needed. Backend-neutral dispatch over nvptx_target_machine() and
+    /// friends. Returns nullptr for backends whose artifact kind is emitted
+    /// straight from IR and needs no real codegen TargetMachine (AMDGPU's
+    /// milestone-0 bitcode/IR artifacts).
+    llvm::TargetMachine* target_machine_for(const GPUTargetDesc& desc);
 
     enum class Linkage {
         External,  // Externally visible
@@ -1031,6 +1046,13 @@ public:
     bool ptx_compile_group(llvm::Module* lib_module, const std::string& name,
                            std::string& out);
 
+    /// Emit a GPU artifact for module according to desc, writing the result
+    /// into out. Backend-neutral dispatch over desc.artifact: PTX text for
+    /// NVPTX, LLVM bitcode or textual IR for AMDGPU. Returns false if
+    /// desc.artifact is None or otherwise unsupported.
+    bool emit_gpu_artifact(const GPUTargetDesc& desc, llvm::Module* module,
+                           std::string& out);
+
     /// Convert all functions in module's bitcode to a string.
     std::string bitcode_string(llvm::Module* module);
 
@@ -1058,6 +1080,14 @@ private:
 
     void SetupLLVM();
     IRBuilder& builder();
+
+    // Backend-specific emitters behind emit_gpu_artifact(). module is taken
+    // explicitly (rather than defaulting to the current module()) so a
+    // future per-arch clone loop can emit each clone without making it the
+    // active module first.
+    bool emit_nvptx_ptx(llvm::Module* module, std::string& out);
+    bool emit_amdgpu_bitcode(llvm::Module* module, std::string& out);
+    bool emit_amdgpu_ir(llvm::Module* module, std::string& out);
 
     int m_debug;
     bool m_dumpasm           = false;
