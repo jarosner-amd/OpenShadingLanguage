@@ -2106,18 +2106,9 @@ empty_group_func(void*, void*)
 
 
 
-void
-BackendLLVM::run()
+bool
+BackendLLVM::setup_module()
 {
-    if (group().does_nothing()) {
-        group().llvm_compiled_init((RunLLVMGroupFunc)empty_group_func);
-        group().llvm_compiled_version((RunLLVMGroupFunc)empty_group_func);
-        return;
-    }
-
-    // At this point, we already hold the lock for this group, by virtue
-    // of ShadingSystemImpl::optimize_group.
-    OIIO::Timer timer;
     std::string err;
 
     {
@@ -2313,14 +2304,20 @@ BackendLLVM::run()
                        shadingsys().llvm_profiling_events())) {
             shadingcontext()->errorfmt("Failed to create engine: {}\n", err);
             OSL_ASSERT(0);
-            return;
+            return false;
         }
 
         // End of mutex lock, for the OSL_LLVM_NO_BITCODE case
     }
 
-    m_stat_llvm_setup_time += timer.lap();
+    return true;
+}
 
+
+
+void
+BackendLLVM::analyze_layer_usage()
+{
     // Set up m_num_used_layers to be the number of layers that are
     // actually used, and m_layer_remap[] to map original layer numbers
     // to the shorter list of actually-called layers. We also note that
@@ -2346,21 +2343,19 @@ BackendLLVM::run()
     shadingsys().m_stat_empty_instances += nlayers - m_num_used_layers;
 
     initialize_llvm_group();
+}
 
-    if (m_layout_only) {
-        // BackendCpp (debug_output_cpp==3) path: force the groupdata layout
-        // so sym.dataoffset() and group().llvm_groupdata_size() are
-        // populated, then skip IR generation and JIT. Execution routes
-        // through the compiled DSO instead.
-        llvm_type_groupdata();
-        m_stat_llvm_irgen_time += timer.lap();
-        return;
-    }
+
+
+void
+BackendLLVM::generate_group_ir(GroupFunctions& funcs)
+{
+    int nlayers = group().nlayers();
 
     // Generate the LLVM IR for each layer.  Skip unused layers.
-    m_llvm_local_mem          = 0;
-    llvm::Function* init_func = build_llvm_init();
-    std::vector<llvm::Function*> funcs(nlayers, NULL);
+    m_llvm_local_mem = 0;
+    funcs.init       = build_llvm_init();
+    funcs.layers.assign(nlayers, NULL);
     for (int layer = 0; layer < nlayers; ++layer) {
         set_inst(layer);
         if (m_layer_remap[layer] != -1) {
@@ -2368,24 +2363,19 @@ BackendLLVM::run()
             // it's the single entry point for the whole group.
             bool is_single_entry = (layer == (nlayers - 1)
                                     && group().num_entry_layers() == 0);
-            funcs[layer]         = build_llvm_instance(is_single_entry);
+            funcs.layers[layer]  = build_llvm_instance(is_single_entry);
         }
     }
 
-    std::vector<llvm::Function*> gpu_externals;
     if (is_gpu_backend())
-        gpu_externals = build_llvm_gpu_callables();
+        funcs.gpu_externals = build_llvm_gpu_callables();
+}
 
-    // llvm::Function* entry_func = group().num_entry_layers() ? NULL : funcs[m_num_used_layers-1];
-    m_stat_llvm_irgen_time += timer.lap();
 
-    if (shadingsys().m_max_local_mem_KB
-        && m_llvm_local_mem / 1024 > shadingsys().m_max_local_mem_KB) {
-        shadingcontext()->errorfmt(
-            "Shader group \"{}\" needs too much local storage: {} KB",
-            group().name(), m_llvm_local_mem / 1024);
-    }
 
+void
+BackendLLVM::prune_and_internalize_ir(const GroupFunctions& funcs)
+{
     // The module contains tons of "library" functions that our generated IR
     // might call. But probably not. We don't want to incur the overhead of
     // fully compiling those, so we want to get rid of all functions not
@@ -2410,13 +2400,14 @@ BackendLLVM::run()
             // wrappers -- confirmed against a second backend built on the
             // same three-callable structure. The CPU JIT path has no
             // wrapper layer and takes the else arm below instead.
-            for (llvm::Function* func : gpu_externals)
+            for (llvm::Function* func : funcs.gpu_externals)
                 external_functions.insert(func);
         } else {
-            external_functions.insert(init_func);
+            external_functions.insert(funcs.init);
 
+            int nlayers = group().nlayers();
             for (int layer = 0; layer < nlayers; ++layer) {
-                llvm::Function* f = funcs[layer];
+                llvm::Function* f = funcs.layers[layer];
                 // If we plan to call bitcode_string of a layer's function after
                 // optimization it may not exist after optimization unless we
                 // treat it as external.
@@ -2427,6 +2418,129 @@ BackendLLVM::run()
         }
         ll.prune_and_internalize_module(external_functions);
     }
+}
+
+
+
+void
+BackendLLVM::optimize_module()
+{
+#if OSL_USE_OPTIX
+    if (use_optix()) {
+        // Set some extra LLVM Function attributes before optimizing the Module.
+        prepare_module_for_cuda_jit();
+    }
+#endif
+
+    // Optimize the LLVM IR unless it's a do-nothing group.
+    if (!group().does_nothing()) {
+        ll.do_optimize();
+    }
+
+#if OSL_USE_OPTIX
+    if (use_optix()) {
+        // Drop everything but the init and group entry functions and generated
+        // group functions. The definitions for the non-inlined library
+        // functions are supplied via a separate shadeops PTX module.
+        for (llvm::Function& fn : *ll.module()) {
+            if (fn.hasFnAttribute("osl-lib-function")) {
+                fn.deleteBody();
+            }
+        }
+    }
+#endif
+}
+
+
+
+void
+BackendLLVM::emit_or_jit(const GroupFunctions& funcs)
+{
+    int nlayers = group().nlayers();
+
+#if OSL_USE_OPTIX
+    if (use_optix()) {
+        std::string ptx;
+        ll.ptx_compile_group(nullptr, group().name().string(), ptx);
+        if (ptx.empty()) {
+            OSL_ASSERT(0 && "Unable to generate PTX");
+        }
+        group().set_ptx_compiled_version(ptx);
+    } else
+#endif
+    {
+        // Force the JIT to happen now and retrieve the JITed function pointers
+        // for the initialization and all public entry points.
+        group().llvm_compiled_init(
+            (RunLLVMGroupFunc)ll.getPointerToFunction(funcs.init));
+        for (int layer = 0; layer < nlayers; ++layer) {
+            llvm::Function* f = funcs.layers[layer];
+            if (f && group().is_entry_layer(layer))
+                group().llvm_compiled_layer(
+                    layer, (RunLLVMGroupFunc)ll.getPointerToFunction(f));
+        }
+        if (group().num_entry_layers())
+            group().llvm_compiled_version(NULL);
+        else
+            group().llvm_compiled_version(
+                group().llvm_compiled_layer(nlayers - 1));
+    }
+
+    if (shadingsys().use_optix_cache()) {
+        std::string cache_key = group().optix_cache_key();
+        renderer()->cache_insert(
+            "optix_ptx", cache_key,
+            optix_cache_wrap(group().ptx_compiled_version(),
+                             group().llvm_groupdata_size(),
+                             group().llvm_groupdata_alignment()));
+    }
+}
+
+
+
+void
+BackendLLVM::run()
+{
+    if (group().does_nothing()) {
+        group().llvm_compiled_init((RunLLVMGroupFunc)empty_group_func);
+        group().llvm_compiled_version((RunLLVMGroupFunc)empty_group_func);
+        return;
+    }
+
+    // At this point, we already hold the lock for this group, by virtue
+    // of ShadingSystemImpl::optimize_group.
+    OIIO::Timer timer;
+
+    if (!setup_module())
+        return;
+
+    m_stat_llvm_setup_time += timer.lap();
+
+    analyze_layer_usage();
+
+    if (m_layout_only) {
+        // BackendCpp (debug_output_cpp==3) path: force the groupdata layout
+        // so sym.dataoffset() and group().llvm_groupdata_size() are
+        // populated, then skip IR generation and JIT. Execution routes
+        // through the compiled DSO instead.
+        llvm_type_groupdata();
+        m_stat_llvm_irgen_time += timer.lap();
+        return;
+    }
+
+    GroupFunctions funcs;
+    generate_group_ir(funcs);
+
+    m_stat_llvm_irgen_time += timer.lap();
+
+    if (shadingsys().m_max_local_mem_KB
+        && m_llvm_local_mem / 1024 > shadingsys().m_max_local_mem_KB) {
+        shadingcontext()->errorfmt(
+            "Shader group \"{}\" needs too much local storage: {} KB",
+            group().name(), m_llvm_local_mem / 1024);
+    }
+
+    prune_and_internalize_ir(funcs);
 
     // Debug code to dump the pre-optimized bitcode to a file
     if (llvm_debug() >= 2 || shadingsys().llvm_output_bitcode()) {
@@ -2464,30 +2578,7 @@ BackendLLVM::run()
         }
     }
 
-#if OSL_USE_OPTIX
-    if (use_optix()) {
-        // Set some extra LLVM Function attributes before optimizing the Module.
-        prepare_module_for_cuda_jit();
-    }
-#endif
-
-    // Optimize the LLVM IR unless it's a do-nothing group.
-    if (!group().does_nothing()) {
-        ll.do_optimize();
-    }
-
-#if OSL_USE_OPTIX
-    if (use_optix()) {
-        // Drop everything but the init and group entry functions and generated
-        // group functions. The definitions for the non-inlined library
-        // functions are supplied via a separate shadeops PTX module.
-        for (llvm::Function& fn : *ll.module()) {
-            if (fn.hasFnAttribute("osl-lib-function")) {
-                fn.deleteBody();
-            }
-        }
-    }
-#endif
+    optimize_module();
 
     m_stat_llvm_opt_time += timer.lap();
 
@@ -2502,7 +2593,7 @@ BackendLLVM::run()
         // different LLC versions and cpu targets
         std::cout << "module after opt  = \n" << ll.module_string() << "\n";
 #else
-        for (auto&& f : funcs)
+        for (auto&& f : funcs.layers)
             if (f)
                 shadingsys().infofmt("func after opt  = {}\n",
                                      ll.bitcode_string(f));
@@ -2532,42 +2623,7 @@ BackendLLVM::run()
         }
     }
 
-#if OSL_USE_OPTIX
-    if (use_optix()) {
-        std::string ptx;
-        ll.ptx_compile_group(nullptr, group().name().string(), ptx);
-        if (ptx.empty()) {
-            OSL_ASSERT(0 && "Unable to generate PTX");
-        }
-        group().set_ptx_compiled_version(ptx);
-    } else
-#endif
-    {
-        // Force the JIT to happen now and retrieve the JITed function pointers
-        // for the initialization and all public entry points.
-        group().llvm_compiled_init(
-            (RunLLVMGroupFunc)ll.getPointerToFunction(init_func));
-        for (int layer = 0; layer < nlayers; ++layer) {
-            llvm::Function* f = funcs[layer];
-            if (f && group().is_entry_layer(layer))
-                group().llvm_compiled_layer(
-                    layer, (RunLLVMGroupFunc)ll.getPointerToFunction(f));
-        }
-        if (group().num_entry_layers())
-            group().llvm_compiled_version(NULL);
-        else
-            group().llvm_compiled_version(
-                group().llvm_compiled_layer(nlayers - 1));
-    }
-
-    if (shadingsys().use_optix_cache()) {
-        std::string cache_key = group().optix_cache_key();
-        renderer()->cache_insert(
-            "optix_ptx", cache_key,
-            optix_cache_wrap(group().ptx_compiled_version(),
-                             group().llvm_groupdata_size(),
-                             group().llvm_groupdata_alignment()));
-    }
+    emit_or_jit(funcs);
 
     // We are destroying the entire module below,
     // no reason to bother destroying individual functions
@@ -2577,10 +2633,10 @@ BackendLLVM::run()
     // a huge amount of time since we won't re-optimize it again and again
     // if we keep adding new shader groups to the same Module.
     for (int i = 0; i < nlayers; ++i) {
-        if (funcs[i])
-            ll.delete_func_body (funcs[i]);
+        if (funcs.layers[i])
+            ll.delete_func_body (funcs.layers[i]);
     }
-    ll.delete_func_body (init_func);
+    ll.delete_func_body (funcs.init);
 #endif
 
     // Free the exec and module to reclaim all the memory.  This definitely
