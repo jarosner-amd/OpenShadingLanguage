@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <unordered_map>
@@ -25,6 +26,26 @@ OSL_NAMESPACE_BEGIN
 
 void
 register_closures(OSL::ShadingSystem* shadingsys);
+
+
+
+/// An ErrorHandler that behaves like the default one, and also counts the
+/// errors it sees, so a caller can tell whether anything went wrong.
+class CountingErrorHandler : public OIIO::ErrorHandler {
+public:
+    void operator()(int errcode, const std::string& msg) override
+    {
+        int level = errcode & 0xffff0000;
+        if (level == EH_ERROR || level == EH_SEVERE)
+            ++m_num_errors;
+        OIIO::ErrorHandler::operator()(errcode, msg);
+    }
+
+    int num_errors() const { return m_num_errors.load(); }
+
+private:
+    std::atomic<int> m_num_errors { 0 };
+};
 
 
 
@@ -164,6 +185,10 @@ public:
 
     OIIO::ErrorHandler& errhandler() const { return *m_errhandler; }
 
+    /// Number of errors (and severe errors) that have been reported through
+    /// errhandler() so far.
+    int num_errors() const { return m_errhandler->num_errors(); }
+
     ShadingSystem* shadingsys = nullptr;
     OIIO::ParamValueList options;
     OIIO::ParamValueList userdata;
@@ -200,7 +225,9 @@ protected:
     std::vector<ShaderGroupRef> m_shaders;
     std::vector<ustring> m_outputvars;
     std::vector<std::shared_ptr<OIIO::ImageBuf>> m_outputbufs;
-    std::unique_ptr<OIIO::ErrorHandler> m_errhandler { new OIIO::ErrorHandler };
+    std::unique_ptr<CountingErrorHandler> m_errhandler {
+        new CountingErrorHandler
+    };
     bool m_use_rs_bitcode = false;
 
     // Named transforms
