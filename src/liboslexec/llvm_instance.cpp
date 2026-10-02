@@ -21,9 +21,11 @@
 #include "oslexec_pvt.h"
 #include "backendllvm.h"
 
+#include <llvm/MC/MCSubtargetInfo.h>
+#include <llvm/Target/TargetMachine.h>
+
 #if OSL_USE_OPTIX
 #    include <llvm/Linker/Linker.h>
-#    include <llvm/Target/TargetMachine.h>
 #endif
 
 // Create external declarations for all built-in funcs we may call from LLVM
@@ -2109,9 +2111,48 @@ empty_group_func(void*, void*)
 
 
 
+// File name stem for the debug dumps of a group. "/" and ":" become "_". A
+// stem longer than `keep` characters is shortened to its last `keep`
+// characters plus the group id, so the full file name stays within file system
+// name limits. Callers with a longer suffix pass a smaller `keep`.
+static std::string
+dump_file_stem(const ShaderGroup& group, size_t keep = 235)
+{
+    std::string stem = Strutil::replace(group.name(), "/", "_", true);
+    stem             = Strutil::replace(stem, ":", "_", true);
+    if (stem.size() > keep)
+        stem = fmtformat("TRUNC_{}_{}", stem.substr(stem.size() - keep),
+                         group.id());
+    return stem;
+}
+
+
+
+// The architectures to emit for. An empty list in the descriptor means one
+// artifact for desc.cpu, which may itself be empty for the generic target.
+static std::vector<std::string>
+requested_archs(const GPUTargetDesc& desc)
+{
+    if (desc.archs.empty())
+        return { desc.cpu };
+    return desc.archs;
+}
+
+
+
 bool
 BackendLLVM::setup_module()
 {
+    if (is_amdgpu_backend()) {
+        // There is no AMDGPU shadeops bitcode yet, so start from an empty
+        // module. Nothing is JIT compiled on this path -- the group is
+        // emitted as an artifact -- so no ExecutionEngine is created either.
+        if (!seed_empty_module_for_gpu())
+            return false;
+        ll.set_target_isa(TargetISA::AMDGCN);
+        return true;
+    }
+
     std::string err;
 
     {
@@ -2331,6 +2372,187 @@ BackendLLVM::setup_module()
 
 
 
+bool
+BackendLLVM::seed_empty_module_for_gpu()
+{
+#ifndef OSL_LLVM_NO_BITCODE
+    // In a build with shadeops bitcode, most shadeops are declared only by
+    // that bitcode module, not by builtindecl.h. This path starts from an
+    // empty module and has no device shadeops bitcode to link in yet, so the
+    // first call to one of them would find no declaration. Fail clearly here
+    // instead.
+    shadingcontext()->errorfmt(
+        "Cannot compile shader group \"{}\" for AMDGPU: this OSL was built with USE_LLVM_BITCODE=ON, which the AMDGPU backend does not support yet",
+        group().name());
+    return false;
+#else
+    const GPUTargetDesc& desc = gpu_target();
+
+    // Bitcode and textual IR are written straight from the module. Any other
+    // artifact kind needs a device code generator this path does not have.
+    if (desc.artifact != GPUArtifactKind::LLVMBitcode
+        && desc.artifact != GPUArtifactKind::LLVMIR) {
+        shadingcontext()->errorfmt(
+            "Cannot compile shader group \"{}\" for AMDGPU: only LLVM bitcode and LLVM IR artifacts are supported",
+            group().name());
+        return false;
+    }
+
+    // The data layout is the same for every architecture of one triple, so
+    // any requested architecture gives the right layout for the module.
+    std::vector<std::string> archs = requested_archs(desc);
+    llvm::TargetMachine* tm        = ll.target_machine_for(desc, archs.front());
+    if (!tm) {
+        shadingcontext()->errorfmt(
+            "Cannot compile shader group \"{}\" for AMDGPU: could not create an LLVM target machine. Is the AMDGPU target in this LLVM build?",
+            group().name());
+        return false;
+    }
+
+    // createTargetMachine() accepts an unknown CPU name with only a warning on
+    // stderr. An artifact for a misspelled architecture would look valid and
+    // fail only much later, so check every requested name here. An empty
+    // name means the generic target and is allowed.
+#    if OSL_LLVM_VERSION >= 230
+    const llvm::MCSubtargetInfo& sti = tm->getMCSubtargetInfo();
+#    else
+    const llvm::MCSubtargetInfo& sti = *tm->getMCSubtargetInfo();
+#    endif
+    for (const std::string& arch : archs) {
+        if (!arch.empty() && !sti.isCPUStringValid(arch)) {
+            shadingcontext()->errorfmt(
+                "Cannot compile shader group \"{}\" for AMDGPU: \"{}\" is not an architecture this LLVM knows",
+                group().name(), arch);
+            return false;
+        }
+    }
+
+    // Take both the triple and the data layout from the target machine, so
+    // the module cannot disagree with the target it will be emitted for. A
+    // data layout must never be hardcoded.
+    ll.module(ll.new_module("llvm_ops"));
+#    if OSL_LLVM_VERSION < 210
+    ll.module()->setTargetTriple(tm->getTargetTriple().str());
+#    else
+    ll.module()->setTargetTriple(tm->getTargetTriple());
+#    endif
+    ll.module()->setDataLayout(tm->createDataLayout());
+    return true;
+#endif
+}
+
+
+
+void
+BackendLLVM::apply_arch_attributes(string_view arch)
+{
+    llvm::StringRef cpu(arch.data(), arch.size());
+    for (llvm::Function& fn : *ll.module()) {
+        if (fn.isDeclaration())
+            continue;
+        if (cpu.empty())
+            fn.removeFnAttr("target-cpu");
+        else
+            fn.addFnAttr("target-cpu", cpu);
+    }
+}
+
+
+
+bool
+BackendLLVM::emit_gpu_artifacts(const GroupFunctions& funcs)
+{
+    const GPUTargetDesc& desc = gpu_target();
+    group().clear_gpu_artifacts();
+
+    // The code object version does not depend on the architecture, so it is
+    // set once rather than per artifact. A module flag may appear only once.
+    // The value and the "error" merge behavior match what clang emits.
+    if (!ll.module()->getModuleFlag("amdhsa_code_object_version"))
+        ll.module()->addModuleFlag(llvm::Module::Error,
+                                   "amdhsa_code_object_version",
+                                   desc.code_obj_version * 100);
+
+    // build_llvm_gpu_callables() returns the entry layer wrapper, then the
+    // init wrapper, then the fused callable, in that order.
+    static const GPUExportKind export_kinds[] = { GPUExportKind::EntryLayer,
+                                                  GPUExportKind::Init,
+                                                  GPUExportKind::FusedEntry };
+    if (funcs.gpu_externals.size() != std::size(export_kinds)) {
+        shadingcontext()->errorfmt(
+            "Internal error: shader group \"{}\" has {} GPU entry points, expected {}",
+            group().name(), funcs.gpu_externals.size(),
+            std::size(export_kinds));
+        return false;
+    }
+    std::vector<GPUExportedSymbol> exports;
+    for (size_t i = 0; i < std::size(export_kinds); ++i) {
+        GPUExportedSymbol sym;
+        sym.kind        = export_kinds[i];
+        sym.symbol_name = funcs.gpu_externals[i]->getName().str();
+        if (sym.kind == GPUExportKind::EntryLayer)
+            sym.layer_name
+                = group()[group().nlayers() - 1]->layername().string();
+        exports.push_back(std::move(sym));
+    }
+
+    // One artifact per requested architecture. The data layout is the same
+    // for all of them, so what differs is the "target-cpu" attribute, which a
+    // downstream consumer needs in order to compile the bitcode for a real
+    // device. Nothing here changes the module's structure, so the same module
+    // is reused for each architecture instead of being cloned.
+    std::vector<std::string> archs = requested_archs(desc);
+
+    for (const std::string& arch : archs) {
+        apply_arch_attributes(arch);
+        std::string payload;
+        if (!ll.emit_gpu_artifact(desc, ll.module(), payload)) {
+            shadingcontext()->errorfmt(
+                "Could not emit the GPU artifact for shader group \"{}\", architecture \"{}\"",
+                group().name(), arch);
+            // Leave the group with no artifacts rather than a partial set.
+            group().clear_gpu_artifacts();
+            return false;
+        }
+
+        CompiledGPUArtifact a;
+        a.backend      = desc.backend;
+        a.artifact     = desc.artifact;
+        a.triple       = llvm::Triple(ll.module()->getTargetTriple()).str();
+        a.arch         = arch;
+        a.llvm_version = OSL_LLVM_FULL_VERSION;
+        // Recorded for the consumer, which applies it when it compiles and
+        // links this bitcode. Nothing on this path changes the IR for it.
+        a.rdc     = desc.rdc;
+        a.exports = exports;
+        a.payload.assign(payload.begin(), payload.end());
+
+        // Same switch as the pre- and post-optimization IR dumps in run().
+        if (llvm_debug() >= 2 || shadingsys().llvm_output_bitcode()) {
+            const char* ext = desc.artifact == GPUArtifactKind::LLVMIR ? "ll"
+                                                                       : "bc";
+            // The "_<arch>.<ext>" suffix is longer than the IR dumps' suffix,
+            // so keep fewer characters of a long group name.
+            std::string name = fmtformat("{}_{}.{}",
+                                         dump_file_stem(group(), 200),
+                                         arch.empty() ? "generic" : arch, ext);
+            OIIO::ofstream out;
+            OIIO::Filesystem::open(out, name, std::ios::out | std::ios::binary);
+            if (out) {
+                out.write(payload.data(), std::streamsize(payload.size()));
+                shadingsys().infofmt("Wrote GPU artifact to '{}'", name);
+            } else {
+                shadingsys().errorfmt("Could not write to '{}'", name);
+            }
+        }
+
+        group().add_gpu_artifact(std::move(a));
+    }
+    return true;
+}
+
+
+
 void
 BackendLLVM::analyze_layer_usage()
 {
@@ -2474,6 +2696,16 @@ BackendLLVM::emit_or_jit(const GroupFunctions& funcs)
 {
     int nlayers = group().nlayers();
 
+    // This sits outside "#if OSL_USE_OPTIX" on purpose: the AMDGPU path does
+    // not depend on CUDA or OptiX. It also returns before the cache insert
+    // below, because the artifact cache only knows how to store PTX so far.
+    if (is_amdgpu_backend()) {
+        // A failure is reported through the error handler and leaves the
+        // group with no artifacts, so there is nothing more to undo here.
+        emit_gpu_artifacts(funcs);
+        return;
+    }
+
 #if OSL_USE_OPTIX
     if (use_optix()) {
         std::string ptx;
@@ -2517,6 +2749,10 @@ BackendLLVM::emit_or_jit(const GroupFunctions& funcs)
 void
 BackendLLVM::run()
 {
+    // A group that does nothing gets CPU no-op function pointers and no GPU
+    // artifact, on every backend. A GPU group can also end up with no
+    // artifact when compilation fails; that case is reported through the
+    // error handler.
     if (group().does_nothing()) {
         group().llvm_compiled_init((RunLLVMGroupFunc)empty_group_func);
         group().llvm_compiled_version((RunLLVMGroupFunc)empty_group_func);
@@ -2560,16 +2796,7 @@ BackendLLVM::run()
 
     // Debug code to dump the pre-optimized bitcode to a file
     if (llvm_debug() >= 2 || shadingsys().llvm_output_bitcode()) {
-        // Make a safe group name that doesn't have "/" in it! Also beware
-        // filename length limits.
-        std::string safegroup;
-        safegroup = Strutil::replace(group().name(), "/", "_", true);
-        safegroup = Strutil::replace(safegroup, ":", "_", true);
-        if (safegroup.size() > 235)
-            safegroup = fmtformat("TRUNC_{}_{}",
-                                  safegroup.substr(safegroup.size() - 235),
-                                  group().id());
-        std::string name = fmtformat("{}.ll", safegroup);
+        std::string name = fmtformat("{}.ll", dump_file_stem(group()));
         OIIO::ofstream out;
         OIIO::Filesystem::open(out, name);
         if (out) {
@@ -2618,16 +2845,7 @@ BackendLLVM::run()
 
     // Debug code to dump the post-optimized bitcode to a file
     if (llvm_debug() >= 2 || shadingsys().llvm_output_bitcode()) {
-        // Make a safe group name that doesn't have "/" in it! Also beware
-        // filename length limits.
-        std::string safegroup;
-        safegroup = Strutil::replace(group().name(), "/", "_", true);
-        safegroup = Strutil::replace(safegroup, ":", "_", true);
-        if (safegroup.size() > 235)
-            safegroup = fmtformat("TRUNC_{}_{}",
-                                  safegroup.substr(safegroup.size() - 235),
-                                  group().id());
-        std::string name = fmtformat("{}_O{}.ll", safegroup,
+        std::string name = fmtformat("{}_O{}.ll", dump_file_stem(group()),
                                      shadingsys().llvm_optimize());
         OIIO::ofstream out;
         OIIO::Filesystem::open(out, name);
