@@ -123,11 +123,14 @@ RuntimeOptimizer::RuntimeOptimizer(ShadingSystemImpl& shadingsys,
     // which will just report through the ShadingContext
     m_shaderglobals.renderer = &m_rendererservices;
 
-    // Disable no_function_return_calls for OptiX renderers, because we
-    // aren't yet set up to support use of debugging symbols for PTX.
-    // FIXME: some day, we are going to want debugging symbols for PTX, and
-    // will need some refactoring of the debugging symbol code.
-    if (shadingsys.renderer()->supports("OptiX"))
+    // Disable no_function_return_calls for every GPU backend, because we
+    // aren't yet set up to support use of debugging symbols there. Debug
+    // info is only set up together with the CPU JIT engine, and GPU
+    // backends never create one; a kept "functioncall_nr" would then reach
+    // codegen with no debug builder behind it.
+    // FIXME: some day, we are going to want debugging symbols for GPU
+    // targets, and will need some refactoring of the debugging symbol code.
+    if (shadingsys.is_gpu_backend())
         m_keep_no_return_function_calls = false;
 }
 
