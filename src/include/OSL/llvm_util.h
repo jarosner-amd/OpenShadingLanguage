@@ -283,10 +283,17 @@ public:
 
     /// Return the TargetMachine for the backend named by desc, creating it
     /// if needed. Backend-neutral dispatch over nvptx_target_machine() and
-    /// friends. Returns nullptr for backends whose artifact kind is emitted
-    /// straight from IR and needs no real codegen TargetMachine (AMDGPU's
-    /// milestone-0 bitcode/IR artifacts).
-    llvm::TargetMachine* target_machine_for(const GPUTargetDesc& desc);
+    /// friends.
+    ///
+    /// Every GPU backend needs one, including those whose artifacts are
+    /// serialized straight from IR and so never run codegen: the module's
+    /// data layout has to come from TargetMachine::createDataLayout(), and a
+    /// data layout must never be hardcoded.
+    ///
+    /// `arch` selects the target CPU, overriding desc.cpu when non-empty.
+    /// Returns nullptr if the target is not present in this LLVM build.
+    llvm::TargetMachine* target_machine_for(const GPUTargetDesc& desc,
+                                            string_view arch = {});
 
     enum class Linkage {
         External,  // Externally visible
@@ -1089,6 +1096,15 @@ private:
     bool emit_amdgpu_bitcode(llvm::Module* module, std::string& out);
     bool emit_amdgpu_ir(llvm::Module* module, std::string& out);
 
+    // Create (and cache) an AMDGPU TargetMachine. Unlike
+    // nvptx_target_machine(), the triple is passed in rather than read from
+    // the current module, so there is no ordering dependency on when the
+    // module's triple is set. Returns nullptr if AMDGPU is not in this LLVM
+    // build.
+    llvm::TargetMachine* amdgpu_target_machine(string_view triple,
+                                               string_view cpu,
+                                               string_view features);
+
     int m_debug;
     bool m_dumpasm           = false;
     bool m_jit_fma           = false;
@@ -1106,6 +1122,10 @@ private:
     llvm::ExecutionEngine* m_llvm_exec;
     TargetISA m_target_isa = TargetISA::UNKNOWN;
     llvm::TargetMachine* m_nvptx_target_machine;
+    llvm::TargetMachine* m_amdgpu_target_machine = nullptr;
+    // triple|cpu|features of m_amdgpu_target_machine, so a request for a
+    // different target rebuilds it instead of silently reusing the wrong one.
+    std::string m_amdgpu_target_machine_key;
 
     std::vector<llvm::BasicBlock*> m_return_block;      // stack for func call
     std::vector<llvm::BasicBlock*> m_loop_after_block;  // stack for break
