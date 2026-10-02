@@ -89,6 +89,22 @@ public:
     /// artifact and store it on the ShaderGroup.
     void emit_or_jit(const GroupFunctions& funcs);
 
+    /// Create an empty Module and give it the triple and data layout of the
+    /// GPU target. Used by the AMDGPU path, which has no shadeops bitcode to
+    /// start from yet. Reports an error and returns false if OSL was built
+    /// with shadeops bitcode, if the artifact kind is not bitcode or IR, if
+    /// no target machine can be created, or if a requested architecture name
+    /// is unknown to LLVM.
+    bool seed_empty_module_for_gpu();
+
+    /// Emit one artifact per requested architecture and store them on the
+    /// ShaderGroup. Returns false if emission fails.
+    bool emit_gpu_artifacts(const GroupFunctions& funcs);
+
+    /// Mark every function definition in the module for `arch`. Clears the
+    /// mark when `arch` is empty.
+    void apply_arch_attributes(string_view arch);
+
 
 
     /// What LLVM debug level are we at?
