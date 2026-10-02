@@ -226,10 +226,19 @@ struct LLVM_Util::PerThreadInfo::Impl {
         delete llvm_context;
         // N.B. Do NOT delete the jitmm -- another thread may need the
         // code! Don't worry, we stashed a pointer in jitmm_hold.
+        delete amdgpu_target_machine;
     }
 
     llvm::LLVMContext* llvm_context = nullptr;
     LLVMMemoryManager* llvm_jitmm   = nullptr;
+    // The AMDGPU TargetMachine that amdgpu_target_machine() made last, and
+    // the triple|cpu|features it was made for, so that a request for a
+    // different target rebuilds it instead of reusing the wrong one. Kept
+    // here, not in LLVM_Util, so that LLVM_Util's layout in the installed
+    // header does not change. A thread runs one LLVM_Util at a time, so the
+    // two never see each other's target machine change under them.
+    llvm::TargetMachine* amdgpu_target_machine = nullptr;
+    std::string amdgpu_target_machine_key;
 };
 
 
@@ -4064,10 +4073,30 @@ LLVM_Util::op_alloca(llvm::Type* llvmtype, int n, const std::string& name,
     if (align > 0) {
         allocainst->setAlignment(llvm::Align(align));
     }
+
+    // Some targets put allocas in a dedicated address space -- AMDGPU uses
+    // addrspace(5) for private memory. The rest of OSL's IR assumes generic
+    // pointers, so cast back to addrspace(0) here, exactly as clang does for
+    // every alloca it emits. This is a no-op on x86 and NVPTX, whose alloca
+    // address space is 0.
+    //
+    // The cast must be created before restoring the insertion point, so that
+    // it lands in the entry block beside the alloca. Callers cache the value
+    // this returns and reuse it from other basic blocks (see
+    // BatchedBackendLLVM::temp_wide_matrix_ptr), which is only valid because
+    // the entry block dominates every other block.
+    llvm::Value* result        = allocainst;
+    const llvm::DataLayout& DL = module()->getDataLayout();
+    if (DL.getAllocaAddrSpace() != 0) {
+        result = builder().CreateAddrSpaceCast(allocainst,
+                                               llvm::PointerType::get(context(),
+                                                                      0));
+    }
+
     OSL_ASSERT(previousIP.isSet());
     m_builder->restoreIP(previousIP);
 
-    return allocainst;
+    return result;
 }
 
 
@@ -6523,14 +6552,72 @@ LLVM_Util::emit_amdgpu_ir(llvm::Module* module, std::string& out)
 
 
 llvm::TargetMachine*
-LLVM_Util::target_machine_for(const GPUTargetDesc& desc)
+LLVM_Util::amdgpu_target_machine(string_view triple, string_view cpu,
+                                 string_view features)
+{
+    std::string key = std::string(triple) + '|' + std::string(cpu) + '|'
+                      + std::string(features);
+    llvm::TargetMachine*& cached = m_thread->amdgpu_target_machine;
+    std::string& cached_key      = m_thread->amdgpu_target_machine_key;
+    if (cached != nullptr && cached_key == key)
+        return cached;
+
+    // N.B. name the string first: Triple t(std::string(triple)) would be
+    // parsed as a function declaration, not a variable.
+    std::string triple_str(triple);
+    llvm::Triple target_triple(triple_str);
+    std::string error;
+#if OSL_LLVM_VERSION >= 220
+    const llvm::Target* llvm_target
+        = llvm::TargetRegistry::lookupTarget(target_triple, error);
+#else
+    const llvm::Target* llvm_target
+        = llvm::TargetRegistry::lookupTarget(target_triple.str(), error);
+#endif
+    if (!llvm_target) {
+        // Unlike NVPTX, AMDGPU may legitimately be absent from the LLVM this
+        // was built against, so this is a runtime condition rather than an
+        // assertion.
+        return nullptr;
+    }
+
+    llvm::TargetOptions options;
+    options.AllowFPOpFusion = llvm::FPOpFusion::Fast;
+
+    delete cached;
+    cached = llvm_target->createTargetMachine(
+#if OSL_LLVM_VERSION >= 210
+        llvm::Triple(target_triple.str()),
+#else
+        target_triple.str(),
+#endif
+        std::string(cpu), std::string(features), options, llvm::Reloc::PIC_,
+        llvm::CodeModel::Small,
+#if OSL_LLVM_VERSION >= 180
+        llvm::CodeGenOptLevel::Default
+#else
+        llvm::CodeGenOpt::Default
+#endif
+    );
+    cached_key = cached ? key : std::string();
+    return cached;
+}
+
+
+
+llvm::TargetMachine*
+LLVM_Util::target_machine_for(const GPUTargetDesc& desc, string_view arch)
 {
     switch (desc.backend) {
     case GPUBackendKind::NVPTX: return nvptx_target_machine();
-    default:
-        // AMDGPU's milestone-0 artifacts (LLVMBitcode, LLVMIR) are emitted
-        // straight from IR and need no real codegen TargetMachine.
-        return nullptr;
+    case GPUBackendKind::AMDGPU: {
+        string_view triple = desc.triple.empty()
+                                 ? string_view("amdgcn-amd-amdhsa")
+                                 : string_view(desc.triple);
+        string_view cpu    = arch.empty() ? string_view(desc.cpu) : arch;
+        return amdgpu_target_machine(triple, cpu, desc.features);
+    }
+    default: return nullptr;
     }
 }
 
