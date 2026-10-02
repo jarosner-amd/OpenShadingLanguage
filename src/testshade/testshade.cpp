@@ -26,6 +26,7 @@
 #include <OpenImageIO/timer.h>
 
 #include <OSL/encodedtypes.h>
+#include <OSL/gpu_target_desc.h>
 #include <OSL/journal.h>
 #include <OSL/oslcomp.h>
 #include <OSL/oslexec.h>
@@ -89,6 +90,10 @@ static bool print_outputs        = false;
 static bool output_placement     = true;
 static bool use_optix            = OIIO::Strutil::stoi(
     OIIO::Sysutil::getenv("TESTSHADE_OPTIX"));
+static bool use_amdgpu = false;  // compile for AMDGPU, emit artifacts only
+static std::vector<std::string> amdgpu_archs;
+static std::string amdgpu_format;  // "", "bitcode" or "llvmir"
+static bool save_amdgpu                 = false;
 static bool optix_no_inline             = false;
 static bool optix_no_inline_layer_funcs = false;
 static bool optix_no_merge_layer_funcs  = false;
@@ -341,14 +346,29 @@ set_shadingsys_options()
         shadingsys->attribute("opt_batched_analysis", 0);
     }
 
+    if (use_amdgpu) {
+        shadingsys->attribute("gpu_backend", "amdgpu");
+        if (amdgpu_archs.size()) {
+            std::vector<const char*> archs;
+            for (const std::string& arch : amdgpu_archs)
+                archs.push_back(arch.c_str());
+            shadingsys->attribute("gpu_archs",
+                                  TypeDesc(TypeDesc::STRING, int(archs.size())),
+                                  archs.data());
+        }
+        if (amdgpu_format.size())
+            shadingsys->attribute("gpu_artifact_kind", amdgpu_format);
+    }
+
     // Allow user provided extraoptions to override the values set above
     if (extraoptions.size())
         shadingsys->attribute("options", extraoptions);
     if (texoptions.size())
         shadingsys->texturesys()->attribute("options", texoptions);
 
-    if (use_optix) {
-        // FIXME: For now, output placement is disabled for OptiX mode
+    if (use_optix || use_amdgpu) {
+        // FIXME: For now, output placement is disabled for OptiX mode, and
+        // nothing is executed in AMDGPU mode.
         output_placement = false;
     }
 
@@ -719,6 +739,14 @@ getargs(int argc, const char* argv[])
       .help("Set thread count (default = 0: auto-detect #cores)");
     ap.arg("--optix", &use_optix)
       .help("Use OptiX if available");
+    ap.arg("--amdgpu", &use_amdgpu)
+      .help("Compile for AMDGPU and emit the artifacts, without running the shader");
+    ap.arg("--amdgpu-arch %L:ARCH", &amdgpu_archs)
+      .help("AMDGPU architecture to compile for, e.g. gfx1100 (repeatable; default: one generic artifact)");
+    ap.arg("--amdgpu-format %s:FORMAT", &amdgpu_format)
+      .help("AMDGPU artifact format: bitcode (default) or llvmir");
+    ap.arg("--save-amdgpu", &save_amdgpu)
+      .help("Write each AMDGPU artifact to a file named amdgpu_<group>_<arch>.<bc|ll>");
     ap.arg("--debug", &debug1)
       .help("Lots of debugging info");
     ap.arg("--debug2", &debug2)
@@ -866,6 +894,31 @@ getargs(int argc, const char* argv[])
 
     // clang-format on
     ap.parse_args(argc, argv);
+
+    // The AMDGPU options only make sense together, and only with the modes
+    // that can work with them. Check here, on the full command line: loading
+    // a shader later calls set_shadingsys_options(), which may reset `batched`.
+    auto bad_options = [](string_view message) {
+        std::cerr << "ERROR: " << message << "\n";
+        exit(EXIT_FAILURE);
+    };
+    if (!use_amdgpu
+        && (amdgpu_archs.size() || amdgpu_format.size() || save_amdgpu))
+        bad_options(
+            "--amdgpu-arch, --amdgpu-format and --save-amdgpu need --amdgpu.");
+    if (amdgpu_format.size() && amdgpu_format != "bitcode"
+        && amdgpu_format != "llvmir")
+        bad_options("Unknown --amdgpu-format \"" + amdgpu_format
+                    + "\". The choices are bitcode and llvmir.");
+    if (use_amdgpu) {
+        if (use_optix)
+            bad_options(
+                "--amdgpu cannot be combined with OptiX (--optix or the TESTSHADE_OPTIX environment variable).");
+        if (batched
+            || OIIO::Strutil::stoi(OIIO::Sysutil::getenv("TESTSHADE_BATCHED")))
+            bad_options(
+                "--amdgpu cannot be combined with batched execution (--batched or the TESTSHADE_BATCHED environment variable).");
+    }
 }
 
 
@@ -1932,6 +1985,100 @@ synchio()
     fflush(stderr);
 }
 
+// Compile the shader group for AMDGPU and report (and optionally save) the
+// artifacts. Nothing is executed. Returns the process exit code: failure if
+// any error was reported, if no artifact came out, or if an artifact could not
+// be read or written.
+static int
+emit_amdgpu(SimpleRenderer* rend)
+{
+    OSL::PerThreadInfo* thread_info = shadingsys->create_thread_info();
+    ShadingContext* ctx             = shadingsys->get_context(thread_info);
+    if (raytype_opt) {
+        raytype_bit = shadingsys->raytype_bit(ustring(raytype_name));
+        shadingsys->optimize_group(shadergroup.get(), raytype_bit, ~raytype_bit,
+                                   ctx);
+    } else {
+        shadingsys->optimize_group(shadergroup.get(), ctx);
+    }
+    // Compile errors are held by the context until it is released, so release
+    // it before looking at the error count.
+    shadingsys->release_context(ctx);
+    shadingsys->destroy_thread_info(thread_info);
+
+    bool ok = (rend->num_errors() == 0);
+
+    int num_artifacts = 0;
+    shadingsys->getattribute(shadergroup.get(), "gpu_num_artifacts",
+                             num_artifacts);
+    if (num_artifacts < 1 && ok) {
+        std::cerr << "ERROR: No AMDGPU artifact was produced. Does the shader "
+                     "write any output? Mark one with -o VARIABLE FILENAME.\n";
+        ok = false;
+    }
+
+    ustring group_name;
+    shadingsys->getattribute(shadergroup.get(), "groupname", group_name);
+    std::string stem = group_name.string();
+    for (char& c : stem) {
+        if (!(std::isalnum((unsigned char)c) || c == '.' || c == '-'))
+            c = '_';
+    }
+
+    for (int i = 0; i < num_artifacts; ++i) {
+        std::string prefix = OSL::fmtformat("gpu_artifact:{}:", i);
+        ustring arch, triple;
+        int kind = 0, num_exports = 0, size = 0;
+        bool got = shadingsys->getattribute(shadergroup.get(), prefix + "arch",
+                                            TypeString, &arch)
+                   && shadingsys->getattribute(shadergroup.get(),
+                                               prefix + "triple", TypeString,
+                                               &triple)
+                   && shadingsys->getattribute(shadergroup.get(),
+                                               prefix + "kind", kind)
+                   && shadingsys->getattribute(shadergroup.get(),
+                                               prefix + "num_exports",
+                                               num_exports)
+                   && shadingsys->getattribute(shadergroup.get(),
+                                               prefix + "size", size);
+        if (!got) {
+            std::cerr << "ERROR: Could not query AMDGPU artifact " << i << "\n";
+            ok = false;
+            continue;
+        }
+        const bool is_ir = (kind == int(GPUArtifactKind::LLVMIR));
+        OSL::print(
+            "AMDGPU artifact {}: arch={} triple={} format={} exports={}\n", i,
+            arch.empty() ? ustring("generic") : arch, triple,
+            is_ir ? "llvmir" : "bitcode", num_exports);
+
+        if (!save_amdgpu)
+            continue;
+        std::vector<unsigned char> data(size_t(size > 0 ? size : 0));
+        if (!shadingsys->getattribute(shadergroup.get(), prefix + "data",
+                                      TypeDesc(TypeDesc::UINT8, int(size)),
+                                      data.data())) {
+            std::cerr << "ERROR: Could not read the data of AMDGPU artifact "
+                      << i << "\n";
+            ok = false;
+            continue;
+        }
+        std::string filename = OSL::fmtformat("amdgpu_{}_{}.{}", stem,
+                                              arch.empty() ? "generic"
+                                                           : arch.string(),
+                                              is_ir ? "ll" : "bc");
+        if (!OIIO::Filesystem::write_binary_file(filename, data)) {
+            std::cerr << "ERROR: Could not write " << filename << "\n";
+            ok = false;
+            continue;
+        }
+        OSL::print("Wrote {}\n", filename);
+    }
+    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+
+
 extern "C" OSL_DLL_EXPORT int
 test_shade(int argc, const char* argv[])
 {
@@ -2136,6 +2283,15 @@ test_shade(int argc, const char* argv[])
 
     // Set up the image outputs requested on the command line
     setup_output_images(rend.get(), shadingsys, shadergroup);
+
+    if (use_amdgpu) {
+        // Compile only: no images, no shading loop.
+        int retcode = emit_amdgpu(rend.get());
+        rend->clear();
+        shadergroup.reset();  // Must release this before destroying shadingsys
+        delete shadingsys;
+        return retcode;
+    }
 
     if (debug1)
         test_group_attributes(shadergroup.get());
