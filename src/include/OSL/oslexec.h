@@ -247,6 +247,34 @@ public:
     ///                              "AVX2", "AVX2_noFMA", "AVX512",
     ///                              "AVX512_noFMA", or "host" means to
     ///                              figure out what the host can do. ("")
+    ///    string gpu_backend     Compile shader groups for a GPU instead of
+    ///                              JITing them: "" follows the renderer
+    ///                              (OptiX if the renderer supports it,
+    ///                              otherwise the CPU), or "amdgpu" produces
+    ///                              AMDGPU artifacts that are not run in this
+    ///                              process. Not allowed together with a
+    ///                              renderer that supports OptiX. ("")
+    ///    string gpu_archs       For "amdgpu": the architectures to produce
+    ///                              an artifact for, such as "gfx1100" and
+    ///                              "gfx1201". Either one string with the
+    ///                              names separated by commas, or an array
+    ///                              of strings. Duplicate names are dropped.
+    ///                              Empty means one artifact for the generic
+    ///                              target. Names with feature suffixes,
+    ///                              such as "gfx90a:xnack+", are not
+    ///                              accepted. In an "options" string the
+    ///                              list must be in quotes, because a comma
+    ///                              otherwise starts the next option:
+    ///                              gpu_archs="gfx1100,gfx1201". ("")
+    ///    string gpu_artifact_kind  For "amdgpu": the form of each artifact,
+    ///                              "bitcode" or "llvmir" (readable text).
+    ///                              "" means "bitcode". ("")
+    ///                           The three GPU attributes can be set in any
+    ///                              order. They cannot be changed once the
+    ///                              first shader group has been compiled;
+    ///                              setting the same value again is fine.
+    ///                              The result of compiling is read from the
+    ///                              group, see "gpu_num_artifacts" below.
     ///    int llvm_jit_aggressive  Use LLVM "aggressive" JIT mode. (0)
     ///    int vector_width       Vector width to allow for SIMD ops (4).
     ///    int llvm_debugging_symbols  When JITing, generate debug symbols
@@ -555,6 +583,18 @@ public:
     ///   string pickle              Retrieves a serialized representation
     ///                                 of the shader group declaration.
     ///   int llvm_groupdata_size    Size of the GroupData struct.
+    ///   int gpu_num_artifacts      Number of compiled GPU artifacts. One per
+    ///                                 architecture, see "gpu_archs".
+    ///   int gpu_artifact:N:backend, gpu_artifact:N:kind, ...
+    ///                              Properties of artifact N, counting from 0.
+    ///                                 All are integers except as noted:
+    ///                                 backend, kind (a GPUArtifactKind), rdc,
+    ///                                 num_exports and size (bytes). The
+    ///                                 strings triple, arch and llvm_version
+    ///                                 are returned as a ustring.
+    ///   uint8 gpu_artifact:N:data[]  Copy of the artifact itself. Ask for
+    ///                                 ":size" first and pass a buffer of at
+    ///                                 least that many bytes.
     ///   ptr interactive_params     Pointer to the memory block containing
     ///                                 host-side interactive parameter values
     ///                                 for this shader group.

@@ -1061,11 +1061,11 @@ namespace Strings {
 namespace pvt {  // OSL::pvt
 
 
-// Build the GPU target descriptor from the renderer capabilities that
-// use_optix() and use_optix_cache() are already derived from, so the two
-// representations cannot disagree. OptiX is the only GPU backend wired up
-// today; the LLVM-level target fields stay empty until the emission path
-// starts consuming them.
+// Build the GPU target descriptor the renderer implies, from the capability
+// queries that use_optix() and use_optix_cache() are derived from, so the two
+// representations cannot disagree. OptiX (NVPTX) is the only target a renderer
+// can ask for by itself. AMDGPU is selected with the "gpu_backend" attribute
+// instead; see ShadingSystemImpl::update_gpu_target().
 static GPUTargetDesc
 make_gpu_target_desc(bool use_optix, bool use_optix_cache)
 {
@@ -1613,6 +1613,99 @@ osl_simd_caps()
 
 
 
+// Turn a list of architecture names into one normalized string. Each of the
+// `n` strings may itself be a comma separated list. Names are trimmed, empty
+// ones are dropped, and a name that is already in the list is not added
+// again, so the order of first appearance is kept. A repeated name would
+// otherwise give two artifacts with the same file name.
+static std::string
+normalize_gpu_archs(const char* const* strings, size_t n)
+{
+    std::vector<std::string> names;
+    for (size_t i = 0; i < n; ++i) {
+        if (!strings[i])
+            continue;
+        for (string_view piece : OIIO::Strutil::splitsv(strings[i], ",")) {
+            std::string name(OIIO::Strutil::strip(piece));
+            if (!name.empty()
+                && std::find(names.begin(), names.end(), name) == names.end())
+                names.push_back(std::move(name));
+        }
+    }
+    return OIIO::Strutil::join(names, ",");
+}
+
+
+
+static bool
+same_gpu_target(const GPUTargetDesc& a, const GPUTargetDesc& b)
+{
+    return a.backend == b.backend && a.artifact == b.artifact
+           && a.triple == b.triple && a.cpu == b.cpu && a.features == b.features
+           && a.data_layout == b.data_layout && a.archs == b.archs
+           && a.rdc == b.rdc && a.code_obj_version == b.code_obj_version
+           && a.enable_cache == b.enable_cache;
+}
+
+
+
+bool
+ShadingSystemImpl::update_gpu_target(ustring backend, const std::string& archs,
+                                     ustring artifact_kind)
+{
+    const string_view backend_sv = backend;
+    const string_view kind_sv    = artifact_kind;
+
+    if (!backend_sv.empty() && backend_sv != "amdgpu") {
+        errorfmt(
+            "Unknown gpu_backend \"{}\". The choices are \"\" (follow the renderer) and \"amdgpu\".",
+            backend);
+        return false;
+    }
+    if (!kind_sv.empty() && kind_sv != "bitcode" && kind_sv != "llvmir") {
+        errorfmt(
+            "Unknown gpu_artifact_kind \"{}\". The choices are \"\" (bitcode), \"bitcode\" and \"llvmir\".",
+            artifact_kind);
+        return false;
+    }
+
+    // Start from what the renderer implies, then replace it for AMDGPU.
+    GPUTargetDesc desc = make_gpu_target_desc(m_use_optix, m_use_optix_cache);
+    if (backend_sv == "amdgpu") {
+        // An OptiX renderer also uses the OptiX PTX cache and the OptiX
+        // printf lowering. Mixing that with AMDGPU would be wrong in ways
+        // that are hard to see, so refuse.
+        if (m_use_optix) {
+            errorfmt(
+                "gpu_backend \"amdgpu\" cannot be used with a renderer that supports OptiX.");
+            return false;
+        }
+        desc          = GPUTargetDesc();
+        desc.backend  = GPUBackendKind::AMDGPU;
+        desc.artifact = (kind_sv == "llvmir") ? GPUArtifactKind::LLVMIR
+                                              : GPUArtifactKind::LLVMBitcode;
+        desc.triple   = "amdgcn-amd-amdhsa";
+        for (string_view name : OIIO::Strutil::splitsv(archs, ","))
+            desc.archs.emplace_back(name);
+    }
+
+    // The same value can always be set again. testshade, for one, applies its
+    // options more than once. Only a real change is refused.
+    if (m_gpu_target_frozen.load() && !same_gpu_target(desc, m_gpu_target)) {
+        errorfmt(
+            "The GPU target cannot be changed after a shader group has been compiled.");
+        return false;
+    }
+
+    m_gpu_backend_attr       = backend;
+    m_gpu_archs_attr         = archs;
+    m_gpu_artifact_kind_attr = artifact_kind;
+    m_gpu_target             = std::move(desc);
+    return true;
+}
+
+
+
 bool
 ShadingSystemImpl::attribute(string_view name, TypeDesc type, const void* val)
 {
@@ -1643,6 +1736,24 @@ ShadingSystemImpl::attribute(string_view name, TypeDesc type, const void* val)
     }
 
     lock_guard guard(m_mutex);  // Thread safety
+
+    // The GPU target settings. Each one rebuilds the target from all three,
+    // so the order in which a client sets them does not matter.
+    if (name == "gpu_backend" && type == TypeDesc::STRING)
+        return update_gpu_target(ustring(*(const char**)val), m_gpu_archs_attr,
+                                 m_gpu_artifact_kind_attr);
+    if (name == "gpu_artifact_kind" && type == TypeDesc::STRING)
+        return update_gpu_target(m_gpu_backend_attr, m_gpu_archs_attr,
+                                 ustring(*(const char**)val));
+    if (name == "gpu_archs" && type.basetype == TypeDesc::STRING) {
+        // One string, or an array of strings. Through "options" only the
+        // single string form is possible.
+        return update_gpu_target(m_gpu_backend_attr,
+                                 normalize_gpu_archs((const char* const*)val,
+                                                     type.numelements()),
+                                 m_gpu_artifact_kind_attr);
+    }
+
     ATTR_SET("statistics:level", int, m_statslevel);
     ATTR_SET("stat:rank_groups", int, m_stat_rank_groups);
     ATTR_SET("debug", int, m_debug);
@@ -1931,6 +2042,11 @@ ShadingSystemImpl::getattribute(string_view name, TypeDesc type, void* val)
     ATTR_DECODE("llvm_jit_fma", int, m_llvm_jit_fma);
     ATTR_DECODE("llvm_jit_aggressive", int, m_llvm_jit_aggressive);
     ATTR_DECODE_STRING("llvm_jit_target", m_llvm_jit_target);
+    // The GPU target settings come back as they were set, not as the
+    // effective target, so setting and getting match.
+    ATTR_DECODE_STRING("gpu_backend", m_gpu_backend_attr);
+    ATTR_DECODE_STRING("gpu_archs", m_gpu_archs_attr);
+    ATTR_DECODE_STRING("gpu_artifact_kind", m_gpu_artifact_kind_attr);
     ATTR_DECODE("vector_width", int, m_vector_width);
     ATTR_DECODE("opt_passes", int, m_opt_passes);
     ATTR_DECODE("optimize_nondebug", int, m_optimize_nondebug);
@@ -4017,6 +4133,16 @@ void
 ShadingSystemImpl::optimize_group(ShaderGroup& group, ShadingContext* ctx,
                                   bool do_jit)
 {
+    // From the first compile on, the GPU target is fixed. The optimizer and
+    // the code generator both read it, and a change between the two would
+    // make them disagree. Taking m_mutex here makes this wait for an
+    // attribute() call that is in the middle of changing the target. Nothing
+    // that holds m_mutex may call optimize_group, or this would deadlock.
+    if (!m_gpu_target_frozen.load()) {
+        lock_guard lock(m_mutex);
+        m_gpu_target_frozen.store(true);
+    }
+
     if (ctx) {
         // Always have ShadingContext remember the group we just optimized
         // to allow calls to find_symbol and get_symbol to be valid after

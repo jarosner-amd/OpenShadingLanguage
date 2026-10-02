@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <list>
 #include <map>
 #include <memory>
@@ -672,8 +673,10 @@ public:
     TextureSystem* texturesys() const { return m_texturesys; }
 
     /// Describes which GPU backend, if any, shader groups are being compiled
-    /// for. Derived from the renderer capability queries that use_optix()
-    /// and use_optix_cache() are also derived from.
+    /// for. By default it follows the renderer: OptiX (NVPTX) if the renderer
+    /// supports it, otherwise none. The "gpu_backend", "gpu_archs" and
+    /// "gpu_artifact_kind" attributes can select AMDGPU instead. The target
+    /// is fixed once the first shader group is compiled.
     const GPUTargetDesc& gpu_target() const { return m_gpu_target; }
 
     /// Are we compiling for a GPU at all, rather than the CPU JIT? The right
@@ -709,7 +712,7 @@ public:
     /// remaining use_optix() branch sites are migrated onto the predicates
     /// above.
     bool use_optix() const { return is_nvptx_backend(); }
-    bool use_optix_cache() const { return m_use_optix_cache; }
+    bool use_optix_cache() const { return m_gpu_target.enable_cache; }
 
     bool debug_nan() const { return m_debugnan; }
     bool debug_uninit() const { return m_debug_uninit; }
@@ -929,6 +932,15 @@ public:
 private:
     void printstats() const;
 
+    /// Check the three GPU target settings, build the GPU target they and
+    /// the renderer imply, and, if it is acceptable, store the settings and
+    /// the target. Reports an error and returns false, changing nothing, if
+    /// a value is not allowed, if AMDGPU is asked for on an OptiX renderer,
+    /// or if the target would change after compilation has started. The
+    /// caller must hold m_mutex.
+    bool update_gpu_target(ustring backend, const std::string& archs,
+                           ustring artifact_kind);
+
     /// Find the index of the named layer in the shader group.
     /// If found, return the index >= 0 and put a pointer to the instance
     /// in inst; if not found, return -1 and set inst to NULL.
@@ -1062,6 +1074,17 @@ private:
     /// Which GPU backend to compile for, if any. The source of truth that
     /// use_optix() and the is_*_backend() predicates all read from.
     GPUTargetDesc m_gpu_target;
+    /// The values of the GPU target attributes as the client set them. The
+    /// target above is rebuilt from these and the renderer's OptiX support
+    /// whenever one of them is set, so the order of the settings does not
+    /// matter.
+    ustring m_gpu_backend_attr;        ///< "" or "amdgpu"
+    std::string m_gpu_archs_attr;      ///< normalized, comma separated
+    ustring m_gpu_artifact_kind_attr;  ///< "", "bitcode" or "llvmir"
+    /// Set when the first shader group starts to compile. After that the GPU
+    /// target can no longer change: the optimizer and the code generator
+    /// both read it, and a change in between would make them disagree.
+    std::atomic<bool> m_gpu_target_frozen { false };
     int m_max_optix_groupdata_alloc;  ///< Maximum OptiX groupdata buffer allocation
     bool m_buffer_printf;             ///< Buffer/batch printf output?
     bool m_no_noise;                  ///< Substitute trivial noise calls
