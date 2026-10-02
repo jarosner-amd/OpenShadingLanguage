@@ -1922,6 +1922,16 @@ public:
         m_compiled_gpu_artifacts.push_back(std::move(a));
     }
 
+    /// Append one compiled artifact. A group holds one per target
+    /// architecture.
+    void add_gpu_artifact(CompiledGPUArtifact&& a)
+    {
+        m_compiled_gpu_artifacts.push_back(std::move(a));
+    }
+
+    /// Remove all compiled artifacts from this group.
+    void clear_gpu_artifacts() { m_compiled_gpu_artifacts.clear(); }
+
     size_t llvm_groupdata_wide_size() const
     {
         return m_llvm_groupdata_wide_size;
