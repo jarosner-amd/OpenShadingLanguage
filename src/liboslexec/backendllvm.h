@@ -52,6 +52,59 @@ public:
     /// Set additional Module/Function options for the CUDA/OptiX target.
     void prepare_module_for_cuda_jit();
 
+    /// The llvm::Functions run() generates for one shader group, passed
+    /// between its phases. These point into the Module that run() destroys
+    /// before returning, so they are deliberately not members.
+    struct GroupFunctions {
+        llvm::Function* init = nullptr;
+        /// One entry per layer, null for layers that were not generated.
+        std::vector<llvm::Function*> layers;
+        /// The direct-callable wrappers, GPU backends only.
+        std::vector<llvm::Function*> gpu_externals;
+    };
+
+    /// Phases of run(), in call order. Split out so a second GPU backend can
+    /// be added without growing run() further.
+
+    /// Create the Module and seed it, then set up the ExecutionEngine or the
+    /// target ISA. Returns false if the group cannot be compiled.
+    bool setup_module();
+
+    /// Fill m_layer_remap and m_num_used_layers, then initialize_llvm_group().
+    void analyze_layer_usage();
+
+    /// Generate the IR for the init function, every used layer, and (on a GPU
+    /// backend) the direct-callable wrappers.
+    void generate_group_ir(GroupFunctions& funcs);
+
+    /// Drop functions nothing reachable calls, and internalize all but the
+    /// group's entry points.
+    void prune_and_internalize_ir(const GroupFunctions& funcs);
+
+    /// Run the optimization passes, with the per-backend preparation and
+    /// cleanup that go around them.
+    void optimize_module();
+
+    /// Either JIT the group and record the function pointers, or emit an
+    /// artifact and store it on the ShaderGroup.
+    void emit_or_jit(const GroupFunctions& funcs);
+
+    /// Create an empty Module and give it the triple and data layout of the
+    /// GPU target. Used by the AMDGPU path, which has no shadeops bitcode to
+    /// start from yet. Reports an error and returns false if OSL was built
+    /// with shadeops bitcode, if the artifact kind is not bitcode or IR, if
+    /// no target machine can be created, or if a requested architecture name
+    /// is unknown to LLVM.
+    bool seed_empty_module_for_gpu();
+
+    /// Emit one artifact per requested architecture and store them on the
+    /// ShaderGroup. Returns false if emission fails.
+    bool emit_gpu_artifacts(const GroupFunctions& funcs);
+
+    /// Mark every function definition in the module for `arch`. Clears the
+    /// mark when `arch` is empty.
+    void apply_arch_attributes(string_view arch);
+
 
 
     /// What LLVM debug level are we at?
