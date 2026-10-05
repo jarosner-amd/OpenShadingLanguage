@@ -1,0 +1,52 @@
+Compiled ops.osl -> ops.oso
+Compiled test.osl -> test.oso
+
+AMDGPU artifact 0: arch=gfx1100 triple=amdgcn-amd-amdhsa format=bitcode exports=3
+Wrote amdgpu_g1_gfx1100.bc
+AMDGPU artifact 1: arch=gfx1201 triple=amdgcn-amd-amdhsa format=bitcode exports=3
+Wrote amdgpu_g1_gfx1201.bc
+
+AMDGPU artifact 0: arch=gfx1100 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+Wrote amdgpu_g1_gfx1100.ll
+AMDGPU artifact 1: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+Wrote amdgpu_g1_gfx1201.ll
+check amdgpu_g1_gfx1100.bc:
+  bitcode magic: ok
+check amdgpu_g1_gfx1201.bc:
+  bitcode magic: ok
+check amdgpu_g1_gfx1100.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 3
+    __direct_callable__fused_g1_name_L
+    __direct_callable__osl_init_group_g1
+    __direct_callable__osl_layer_group_g1_name_L
+  target-cpu: gfx1100
+  every define has target-cpu: yes
+  code object version 500: yes
+  host pointers: none
+  declares osl noise: no
+check amdgpu_g1_gfx1201.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 3
+    __direct_callable__fused_g1_name_L
+    __direct_callable__osl_init_group_g1
+    __direct_callable__osl_layer_group_g1_name_L
+  target-cpu: gfx1201
+  every define has target-cpu: yes
+  code object version 500: yes
+  host pointers: none
+  declares osl noise: no
+
+AMDGPU artifact 0: arch=generic triple=amdgcn-amd-amdhsa format=llvmir exports=3
+Wrote amdgpu_g2_generic.ll
+check amdgpu_g2_generic.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 3
+    __direct_callable__fused_g2_name_L
+    __direct_callable__osl_init_group_g2
+    __direct_callable__osl_layer_group_g2_name_L
+  target-cpu: none
+  every define has target-cpu: no
+  code object version 500: yes
+  host pointers: none
+  declares osl noise: yes
