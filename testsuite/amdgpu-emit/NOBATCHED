@@ -1,0 +1,2 @@
+# Excluded from batched testing: testshade --amdgpu only compiles for AMDGPU
+# and rejects batched execution (--batched or TESTSHADE_BATCHED).
