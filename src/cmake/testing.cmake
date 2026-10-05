@@ -560,6 +560,15 @@ macro (osl_add_all_tests)
         TESTSUITE ( testoptix testoptix-noise example-cuda)
     endif ()
 
+    # AMDGPU emit-only tests: compile a shader group for AMDGPU without
+    # running it, so they need no GPU and no ROCm. The AMDGPU path needs
+    # USE_LLVM_BITCODE=OFF and an LLVM built with the AMDGPU target. The
+    # tests use gfx1201, which older LLVM releases do not know.
+    if (NOT USE_LLVM_BITCODE AND LLVM_TARGETS MATCHES "AMDGPU"
+        AND LLVM_VERSION VERSION_GREATER_EQUAL 18.0)
+        TESTSUITE ( amdgpu-emit )
+    endif ()
+
     # Some regression tests have a lot of combinations and may need more time to finish
     if (OSL_BUILD_BATCHED)
         set_tests_properties (arithmetic-reg.regress.batched.opt

@@ -1,0 +1,14 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// A shader that calls shadeops on values that are only known at run time, so
+// the emitted AMDGPU code keeps them as external calls (OSL does not link the
+// shadeop library into AMDGPU artifacts yet).
+shader
+ops (output color Cout = 0)
+{
+    float n = noise(P * 4);
+    float s = sin(u * 6.28) + pow(v, 2.2);
+    Cout = color(n, s, u);
+}
