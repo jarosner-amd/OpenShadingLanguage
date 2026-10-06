@@ -2328,6 +2328,33 @@ get_gpu_artifact_attribute(const ShaderGroup* group, string_view name,
         return false;
     const CompiledGPUArtifact& art = artifacts[index];
 
+    // "gpu_artifact:<N>:export:<M>:<field>", one entry per exported symbol.
+    if (OIIO::Strutil::parse_prefix(rest, "export:")) {
+        int m = -1;
+        if (!OIIO::Strutil::parse_int(rest, m)
+            || !OIIO::Strutil::parse_prefix(rest, ":") || m < 0
+            || m >= (int)art.exports.size()
+            || type.basetype != TypeDesc::STRING)
+            return false;
+        const GPUExportedSymbol& sym = art.exports[m];
+        if (rest == "kind") {
+            *(ustring*)val = ustring(sym.kind == GPUExportKind::Init ? "init"
+                                     : sym.kind == GPUExportKind::EntryLayer
+                                         ? "entry"
+                                         : "fused");
+            return true;
+        }
+        if (rest == "layer") {
+            *(ustring*)val = ustring(sym.layer_name);
+            return true;
+        }
+        if (rest == "symbol") {
+            *(ustring*)val = ustring(sym.symbol_name);
+            return true;
+        }
+        return false;
+    }
+
     if (rest == "backend" && type == TypeInt) {
         *(int*)val = (int)art.backend;
         return true;

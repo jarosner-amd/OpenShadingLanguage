@@ -1,15 +1,30 @@
+Compiled entry_a.osl -> entry_a.oso
+Compiled entry_b.osl -> entry_b.oso
+Compiled entry_c.osl -> entry_c.oso
 Compiled ops.osl -> ops.oso
 Compiled strings.osl -> strings.oso
 Compiled test.osl -> test.oso
 
 AMDGPU artifact 0: arch=gfx1100 triple=amdgcn-amd-amdhsa format=bitcode exports=3
+  export 0: kind=entry layer=L symbol=__direct_callable__osl_layer_group_g1_name_L
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_g1
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_g1_name_L
 Wrote amdgpu_g1_gfx1100.bc
 AMDGPU artifact 1: arch=gfx1201 triple=amdgcn-amd-amdhsa format=bitcode exports=3
+  export 0: kind=entry layer=L symbol=__direct_callable__osl_layer_group_g1_name_L
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_g1
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_g1_name_L
 Wrote amdgpu_g1_gfx1201.bc
 
 AMDGPU artifact 0: arch=gfx1100 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=L symbol=__direct_callable__osl_layer_group_g1_name_L
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_g1
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_g1_name_L
 Wrote amdgpu_g1_gfx1100.ll
 AMDGPU artifact 1: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=L symbol=__direct_callable__osl_layer_group_g1_name_L
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_g1
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_g1_name_L
 Wrote amdgpu_g1_gfx1201.ll
 check amdgpu_g1_gfx1100.bc:
   bitcode magic: ok
@@ -39,6 +54,9 @@ check amdgpu_g1_gfx1201.ll:
   declares osl noise: no
 
 AMDGPU artifact 0: arch=generic triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=L symbol=__direct_callable__osl_layer_group_g2_name_L
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_g2
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_g2_name_L
 Wrote amdgpu_g2_generic.ll
 check amdgpu_g2_generic.ll:
   triple: amdgcn-amd-amdhsa
@@ -53,6 +71,9 @@ check amdgpu_g2_generic.ll:
   declares osl noise: yes
 
 AMDGPU artifact 0: arch=gfx1100 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=L symbol=__direct_callable__osl_layer_group_g3_name_L
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_g3
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_g3_name_L
 Wrote amdgpu_g3_gfx1100.ll
 check amdgpu_g3_gfx1100.ll:
   triple: amdgcn-amd-amdhsa
@@ -60,6 +81,26 @@ check amdgpu_g3_gfx1100.ll:
     __direct_callable__fused_g3_name_L
     __direct_callable__osl_init_group_g3
     __direct_callable__osl_layer_group_g3_name_L
+  target-cpu: gfx1100
+  every define has target-cpu: yes
+  code object version: 600
+  host pointers: none
+  declares osl noise: no
+
+Entry layers: A(0) B(1)
+AMDGPU artifact 0: arch=gfx1100 triple=amdgcn-amd-amdhsa format=llvmir exports=4
+  export 0: kind=entry layer=A symbol=__direct_callable__osl_layer_group_g5_name_A
+  export 1: kind=entry layer=B symbol=__direct_callable__osl_layer_group_g5_name_B
+  export 2: kind=init layer=- symbol=__direct_callable__osl_init_group_g5
+  export 3: kind=fused layer=- symbol=__direct_callable__fused_g5_name_C
+Wrote amdgpu_g5_gfx1100.ll
+check amdgpu_g5_gfx1100.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 4
+    __direct_callable__fused_g5_name_C
+    __direct_callable__osl_init_group_g5
+    __direct_callable__osl_layer_group_g5_name_A
+    __direct_callable__osl_layer_group_g5_name_B
   target-cpu: gfx1100
   every define has target-cpu: yes
   code object version: 600

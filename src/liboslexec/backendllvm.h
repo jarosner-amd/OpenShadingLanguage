@@ -55,12 +55,20 @@ public:
     /// The llvm::Functions run() generates for one shader group, passed
     /// between its phases. These point into the Module that run() destroys
     /// before returning, so they are deliberately not members.
+    /// One direct-callable wrapper of a GPU group, and what it calls.
+    struct GPUCallable {
+        GPUExportKind kind;
+        /// The layer an EntryLayer wrapper calls; -1 for Init and FusedEntry.
+        int layer;
+        llvm::Function* fn;
+    };
+
     struct GroupFunctions {
         llvm::Function* init = nullptr;
         /// One entry per layer, null for layers that were not generated.
         std::vector<llvm::Function*> layers;
         /// The direct-callable wrappers, GPU backends only.
-        std::vector<llvm::Function*> gpu_externals;
+        std::vector<GPUCallable> gpu_externals;
     };
 
     /// Phases of run(), in call order. Split out so a second GPU backend can
@@ -130,9 +138,15 @@ public:
     /// Create an llvm function for group initialization code.
     llvm::Function* build_llvm_init();
 
-    // Create llvm functions for the GPU callables (init, entry layer, fused)
-    std::vector<llvm::Function*> build_llvm_gpu_callables();
+    // Create llvm functions for the GPU callables (entry layers, init,
+    // fused), in that order.
+    std::vector<GPUCallable> build_llvm_gpu_callables();
     llvm::Function* build_llvm_fused_callable();
+
+    /// The layers that get their own GPU entry wrapper, in layer order. On
+    /// AMDGPU with explicit entry layers, every entry layer; otherwise only
+    /// the last layer.
+    std::vector<int> gpu_entry_layers();
 
     /// Build up LLVM IR code for the given range [begin,end) or
     /// opcodes, putting them (initially) into basic block bb (or the

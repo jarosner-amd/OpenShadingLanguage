@@ -2051,6 +2051,25 @@ emit_amdgpu(SimpleRenderer* rend)
             "AMDGPU artifact {}: arch={} triple={} format={} exports={}\n", i,
             arch.empty() ? ustring("generic") : arch, triple,
             is_ir ? "llvmir" : "bitcode", num_exports);
+        for (int m = 0; m < num_exports; ++m) {
+            std::string eprefix = OSL::fmtformat("{}export:{}:", prefix, m);
+            ustring ekind, elayer, esymbol;
+            if (!shadingsys->getattribute(shadergroup.get(), eprefix + "kind",
+                                          TypeString, &ekind)
+                || !shadingsys->getattribute(shadergroup.get(),
+                                             eprefix + "layer", TypeString,
+                                             &elayer)
+                || !shadingsys->getattribute(shadergroup.get(),
+                                             eprefix + "symbol", TypeString,
+                                             &esymbol)) {
+                std::cerr << "ERROR: Could not query export " << m
+                          << " of AMDGPU artifact " << i << "\n";
+                ok = false;
+                continue;
+            }
+            OSL::print("  export {}: kind={} layer={} symbol={}\n", m, ekind,
+                       elayer.empty() ? ustring("-") : elayer, esymbol);
+        }
 
         if (!save_amdgpu)
             continue;

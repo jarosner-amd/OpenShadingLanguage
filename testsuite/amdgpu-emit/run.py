@@ -36,4 +36,13 @@ command += check("amdgpu_g2_generic.ll")
 command += amdgpu("g3", "strings", "--amdgpu-arch gfx1100 --amdgpu-format llvmir")
 command += check("amdgpu_g3_gfx1100.ll")
 
+# Two explicit entry layers, A and B, and a last layer C that is neither an
+# entry nor used, so it is not compiled. Each entry layer gets its own
+# export, and the fused export runs init, A and B.
+command += testshade("-g 1 1 --groupname g5 --layer A entry_a --layer B entry_b"
+                     + " --layer C entry_c --entry A --entry B --amdgpu"
+                     + " --amdgpu-arch gfx1100 --amdgpu-format llvmir"
+                     + " --save-amdgpu -o Cout null")
+command += check("amdgpu_g5_gfx1100.ll")
+
 outputs = [ "out.txt" ]

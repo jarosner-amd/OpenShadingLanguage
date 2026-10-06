@@ -600,6 +600,18 @@ public:
     ///   uint8 gpu_artifact:N:data[]  Copy of the artifact itself. Ask for
     ///                                 ":size" first and pass a buffer of at
     ///                                 least that many bytes.
+    ///   string gpu_artifact:N:export:M:kind, ...:layer, ...:symbol
+    ///                              Exported symbol M of artifact N, counting
+    ///                                 from 0 up to num_exports: its kind
+    ///                                 ("init", "entry" or "fused"), the
+    ///                                 layer an "entry" export runs (empty
+    ///                                 otherwise), and its symbol name. For
+    ///                                 AMDGPU with entry_layers set, there is
+    ///                                 one "entry" export per entry layer and
+    ///                                 the "fused" one runs init and then
+    ///                                 every entry layer; use these rather
+    ///                                 than group_entry_name, which always
+    ///                                 names the last layer.
     ///   ptr interactive_params     Pointer to the memory block containing
     ///                                 host-side interactive parameter values
     ///                                 for this shader group.

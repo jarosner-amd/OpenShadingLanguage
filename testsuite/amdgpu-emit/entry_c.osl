@@ -1,0 +1,11 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// The last layer of the group: not an entry layer, and nothing reads its
+// output, so it is not compiled at all.
+shader
+entry_c (output color Cunused = 0)
+{
+    Cunused = color(1, 0, 0);
+}

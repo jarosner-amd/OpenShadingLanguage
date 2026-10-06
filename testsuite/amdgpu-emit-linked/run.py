@@ -28,9 +28,16 @@ archs = "--amdgpu-arch gfx1100 --amdgpu-arch gfx1201"
 command = amdgpu("g1", "test", archs + " --amdgpu-format llvmir")
 command += amdgpu("g2", "ops", archs + " --amdgpu-format llvmir")
 command += amdgpu("g3", "ops", "--amdgpu-arch gfx1201")
+# Two explicit entry layers, A and B, and a last layer C that is neither an
+# entry nor used, so it is not compiled. Each entry layer gets its own
+# export, and the fused export runs init, A and B.
+command += testshade("-g 1 1 --groupname g5 --layer A entry_a --layer B entry_b"
+                     + " --layer C entry_c --entry A --entry B --amdgpu"
+                     + " --amdgpu-arch gfx1100 --amdgpu-format llvmir"
+                     + " --save-amdgpu -o Cout null")
 for f in [ "amdgpu_g1_gfx1100.ll", "amdgpu_g1_gfx1201.ll",
            "amdgpu_g2_gfx1100.ll", "amdgpu_g2_gfx1201.ll",
-           "amdgpu_g3_gfx1201.bc" ] :
+           "amdgpu_g3_gfx1201.bc", "amdgpu_g5_gfx1100.ll" ] :
     command += check(f)
 
 outputs = [ "out.txt" ]
