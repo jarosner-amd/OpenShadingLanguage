@@ -1,4 +1,5 @@
 Compiled ops.osl -> ops.oso
+Compiled strings.osl -> strings.oso
 Compiled test.osl -> test.oso
 
 AMDGPU artifact 0: arch=gfx1100 triple=amdgcn-amd-amdhsa format=bitcode exports=3
@@ -50,3 +51,17 @@ check amdgpu_g2_generic.ll:
   code object version: 600
   host pointers: none
   declares osl noise: yes
+
+AMDGPU artifact 0: arch=gfx1100 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+Wrote amdgpu_g3_gfx1100.ll
+check amdgpu_g3_gfx1100.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 3
+    __direct_callable__fused_g3_name_L
+    __direct_callable__osl_init_group_g3
+    __direct_callable__osl_layer_group_g3_name_L
+  target-cpu: gfx1100
+  every define has target-cpu: yes
+  code object version: 600
+  host pointers: none
+  declares osl noise: no

@@ -29,4 +29,11 @@ for f in [ "amdgpu_g1_gfx1100.bc", "amdgpu_g1_gfx1201.bc",
 command += amdgpu("g2", "ops", "--amdgpu-format llvmir")
 command += check("amdgpu_g2_generic.ll")
 
+# A string array read at a run-time index. In the .opt variants the runtime
+# optimizer turns it into a constant global, whose elements are string
+# hashes: they must not be stored as pointers. The other variants keep a
+# local array, which gives the same checker output.
+command += amdgpu("g3", "strings", "--amdgpu-arch gfx1100 --amdgpu-format llvmir")
+command += check("amdgpu_g3_gfx1100.ll")
+
 outputs = [ "out.txt" ]
