@@ -733,12 +733,18 @@ BackendLLVM::llvm_create_constant(const Symbol& sym)
                 const_element = ll.constant(sym.get_int(linear_index));
             }
             if (sym.typespec().is_string_based()) {
-                // TODO:  right now stored as char *, but change to int64 when we can
-                const_element = reinterpret_cast<llvm::Constant*>(
-                    ll.constant_ptr(
-                        OSL::bitcast<char*>(
-                            ustring(sym.get_string(linear_index)).hash()),
-                        ll.type_char_ptr()));
+                ustring s(sym.get_string(linear_index));
+                if (is_gpu_backend()) {
+                    // A GPU backend represents a string as its uint64 hash
+                    // (see llvm_typedesc), and a hash is not an address, so
+                    // store it as an integer rather than as a pointer.
+                    const_element = ll.constant64(uint64_t(s.hash()));
+                } else {
+                    // TODO:  right now stored as char *, but change to int64 when we can
+                    const_element = reinterpret_cast<llvm::Constant*>(
+                        ll.constant_ptr(OSL::bitcast<char*>(s.hash()),
+                                        ll.type_char_ptr()));
+                }
             }
             OSL_ASSERT(const_element && "unhandled type");
             elements.push_back(const_element);
