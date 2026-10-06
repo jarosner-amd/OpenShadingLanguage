@@ -22,7 +22,7 @@ check amdgpu_g1_gfx1100.ll:
     __direct_callable__osl_layer_group_g1_name_L
   target-cpu: gfx1100
   every define has target-cpu: yes
-  code object version 500: yes
+  code object version: 600
   host pointers: none
   declares osl noise: no
 check amdgpu_g1_gfx1201.ll:
@@ -33,7 +33,7 @@ check amdgpu_g1_gfx1201.ll:
     __direct_callable__osl_layer_group_g1_name_L
   target-cpu: gfx1201
   every define has target-cpu: yes
-  code object version 500: yes
+  code object version: 600
   host pointers: none
   declares osl noise: no
 
@@ -47,6 +47,6 @@ check amdgpu_g2_generic.ll:
     __direct_callable__osl_layer_group_g2_name_L
   target-cpu: none
   every define has target-cpu: no
-  code object version 500: yes
+  code object version: 600
   host pointers: none
   declares osl noise: yes

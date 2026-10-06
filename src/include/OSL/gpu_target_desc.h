@@ -43,8 +43,10 @@ struct GPUTargetDesc {
     /// (`-fgpu-rdc`). Must be applied consistently across every device
     /// artifact class that gets linked together, or the final link fails
     /// on a relocation-model mismatch.
-    bool rdc             = false;
-    int code_obj_version = 5;
+    bool rdc = false;
+    /// AMDGPU code object version. The embedded AMDGPU device shadeops are
+    /// built for this version, so the two must stay the same.
+    int code_obj_version = 6;
     bool enable_cache    = false;
 };
 

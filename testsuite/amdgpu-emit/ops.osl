@@ -3,8 +3,8 @@
 // https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
 
 // A shader that calls shadeops on values that are only known at run time, so
-// the emitted AMDGPU code keeps them as external calls (OSL does not link the
-// shadeop library into AMDGPU artifacts yet).
+// the emitted AMDGPU code keeps them as external calls (in a build without
+// USE_LLVM_BITCODE, OSL does not link device shadeops into the artifacts).
 shader
 ops (output color Cout = 0)
 {
