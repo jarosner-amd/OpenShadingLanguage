@@ -1,0 +1,10 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// Second of two explicit entry layers.
+shader
+entry_b (output color Cout = 0)
+{
+    Cout = color(v, u, 1);
+}

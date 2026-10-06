@@ -1433,15 +1433,34 @@ BackendLLVM::build_llvm_init()
 //  functions as direct callables because the fused callable can't call other
 //  direct callables.
 //
-std::vector<llvm::Function*>
+std::vector<int>
+BackendLLVM::gpu_entry_layers()
+{
+    int nlayers = group().nlayers();
+    // With explicit entry layers, the last layer need not be an entry layer
+    // or even be compiled, so on AMDGPU each entry layer gets its own entry
+    // callable instead. Without them, the last layer is the group entry.
+    std::vector<int> layers;
+    if (is_amdgpu_backend() && group().num_entry_layers()) {
+        for (int layer = 0; layer < nlayers; ++layer)
+            if (group().is_entry_layer(layer))
+                layers.push_back(layer);
+    } else {
+        layers.push_back(nlayers - 1);
+    }
+    return layers;
+}
+
+
+
+std::vector<BackendLLVM::GPUCallable>
 BackendLLVM::build_llvm_gpu_callables()
 {
-    std::vector<llvm::Function*> funcs;
+    std::vector<GPUCallable> funcs;
 
-    // Build a callable for the entry layer function
-    {
-        int nlayers               = group().nlayers();
-        ShaderInstance* inst      = group()[nlayers - 1];
+    // Build a callable for each entry layer function
+    for (int layer : gpu_entry_layers()) {
+        ShaderInstance* inst      = group()[layer];
         std::string dc_entry_name = layer_function_name(group(), *inst, true);
 
         ll.current_function(
@@ -1472,7 +1491,8 @@ BackendLLVM::build_llvm_gpu_callables()
         ll.op_return();
         ll.end_builder();
 
-        funcs.push_back(ll.current_function());
+        funcs.push_back(
+            { GPUExportKind::EntryLayer, layer, ll.current_function() });
     }
 
     // Build a callable for the init function
@@ -1508,10 +1528,11 @@ BackendLLVM::build_llvm_gpu_callables()
         ll.op_return();
         ll.end_builder();
 
-        funcs.push_back(ll.current_function());
+        funcs.push_back({ GPUExportKind::Init, -1, ll.current_function() });
     }
 
-    funcs.push_back(build_llvm_fused_callable());
+    funcs.push_back(
+        { GPUExportKind::FusedEntry, -1, build_llvm_fused_callable() });
     return funcs;
 }
 
@@ -1567,12 +1588,12 @@ BackendLLVM::build_llvm_fused_callable(void)
     std::string init_name = init_function_name(shadingsys(), group());
     ll.call_function(init_name.c_str(), args);
 
-    int nlayers          = group().nlayers();
-    ShaderInstance* inst = group()[nlayers - 1];
-
-    // Call entry
-    std::string layer_name = layer_function_name(group(), *inst);
-    ll.call_function(layer_name.c_str(), args);
+    // Call the entry layers, in layer order. Entry layers other than the
+    // last one skip themselves if an earlier layer already ran them.
+    for (int layer : gpu_entry_layers()) {
+        std::string layer_name = layer_function_name(group(), *group()[layer]);
+        ll.call_function(layer_name.c_str(), args);
+    }
 
     ll.op_return();
     ll.end_builder();
@@ -2671,27 +2692,27 @@ BackendLLVM::emit_gpu_artifacts(const GroupFunctions& funcs)
                                    "amdhsa_code_object_version",
                                    desc.code_obj_version * 100);
 
-    // build_llvm_gpu_callables() returns the entry layer wrapper, then the
-    // init wrapper, then the fused callable, in that order.
-    static const GPUExportKind export_kinds[] = { GPUExportKind::EntryLayer,
-                                                  GPUExportKind::Init,
-                                                  GPUExportKind::FusedEntry };
-    if (funcs.gpu_externals.size() != std::size(export_kinds)) {
-        shadingcontext()->errorfmt(
-            "Internal error: shader group \"{}\" has {} GPU entry points, expected {}",
-            group().name(), funcs.gpu_externals.size(),
-            std::size(export_kinds));
-        return false;
-    }
+    // One export per callable: the entry layer wrappers, the init wrapper
+    // and the fused callable.
     std::vector<GPUExportedSymbol> exports;
-    for (size_t i = 0; i < std::size(export_kinds); ++i) {
+    int num_init = 0, num_entry = 0, num_fused = 0;
+    for (const GPUCallable& c : funcs.gpu_externals) {
         GPUExportedSymbol sym;
-        sym.kind        = export_kinds[i];
-        sym.symbol_name = funcs.gpu_externals[i]->getName().str();
-        if (sym.kind == GPUExportKind::EntryLayer)
-            sym.layer_name
-                = group()[group().nlayers() - 1]->layername().string();
+        sym.kind        = c.kind;
+        sym.symbol_name = c.fn->getName().str();
+        if (c.kind == GPUExportKind::EntryLayer) {
+            sym.layer_name = group()[c.layer]->layername().string();
+            ++num_entry;
+        }
+        num_init += c.kind == GPUExportKind::Init;
+        num_fused += c.kind == GPUExportKind::FusedEntry;
         exports.push_back(std::move(sym));
+    }
+    if (num_init != 1 || num_fused != 1 || num_entry < 1) {
+        shadingcontext()->errorfmt(
+            "Internal error: shader group \"{}\" has {} init, {} entry and {} fused GPU entry points",
+            group().name(), num_init, num_entry, num_fused);
+        return false;
     }
 
     // One artifact per requested architecture. The data layout is the same
@@ -2857,11 +2878,10 @@ BackendLLVM::prune_and_internalize_ir(const GroupFunctions& funcs)
         std::unordered_set<llvm::Function*> external_functions;
         if (is_gpu_backend()) {
             // Every GPU backend's export set is its direct-callable
-            // wrappers -- confirmed against a second backend built on the
-            // same three-callable structure. The CPU JIT path has no
-            // wrapper layer and takes the else arm below instead.
-            for (llvm::Function* func : funcs.gpu_externals)
-                external_functions.insert(func);
+            // wrappers. The CPU JIT path has no wrapper layer and takes the
+            // else arm below instead.
+            for (const GPUCallable& c : funcs.gpu_externals)
+                external_functions.insert(c.fn);
         } else {
             external_functions.insert(funcs.init);
 
