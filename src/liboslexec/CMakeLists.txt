@@ -247,6 +247,39 @@ if (USE_LLVM_BITCODE)
             DESTINATION ${OSL_PTX_INSTALL_DIR})
 
     endif ()
+
+    if (OSL_ENABLE_AMDGPU)
+        add_compile_definitions (OSL_LLVM_AMDGPU_BITCODE)
+
+        # The AMDGPU device shadeops are compiled once per GPU architecture
+        # and embedded in liboslexec. When a shader group is compiled for
+        # AMDGPU, the bitcode for each requested architecture is linked into
+        # that architecture's artifact. Only llvm_ops.cpp so far.
+        set (amdgpu_shadeops_srcs ${CMAKE_SOURCE_DIR}/src/liboslexec/llvm_ops.cpp)
+        # OpenImageIO first, as for the liboslexec target itself, so that the
+        # OpenImageIO we build against is not hidden by another copy that
+        # may sit in a dependency's include directory.
+        set (amdgpu_include_dirs ${OpenImageIO_INCLUDES} ${include_dirs})
+
+        set (amdgpu_shadeops_decls "")
+        set (amdgpu_shadeops_entries "")
+        foreach (arch ${OSL_HIP_TARGET_ARCHS})
+            HIP_SHADEOPS_COMPILE ( "shadeops_amdgpu" ${arch} shadeops_amdgpu_bc
+                                   "${amdgpu_shadeops_srcs}" "${amdgpu_include_dirs}" )
+            set (sym "shadeops_amdgpu_llvm_compiled_ops_${arch}")
+            set (shadeops_bc_amdgpu_cpp "${CMAKE_CURRENT_BINARY_DIR}/shadeops_amdgpu_${arch}.bc.cpp")
+            MAKE_EMBEDDED_CPP ( ${sym} ${shadeops_bc_amdgpu_cpp} ${shadeops_amdgpu_bc} )
+            list (APPEND lib_src ${shadeops_bc_amdgpu_cpp})
+            string (APPEND amdgpu_shadeops_decls
+                    "extern unsigned char ${sym}_block[];\nextern int ${sym}_size;\n")
+            string (APPEND amdgpu_shadeops_entries
+                    "    { \"${arch}\", ${sym}_block, ${sym}_size },\n")
+        endforeach ()
+        string (REPLACE ";" "," amdgpu_shadeops_archs "${OSL_HIP_TARGET_ARCHS}")
+        configure_file (amdgpu_shadeops.cpp.in
+                        "${CMAKE_CURRENT_BINARY_DIR}/amdgpu_shadeops.cpp" @ONLY)
+        list (APPEND lib_src "${CMAKE_CURRENT_BINARY_DIR}/amdgpu_shadeops.cpp")
+    endif ()
     # Also compile llvm_ops.cpp as a native object so that generated shader
     # DSOs (cpp backend, debug_output_cpp >= 2) can link osl_* symbols from
     # liboslexec at load time.  The bitcode copy (above) is still used by the
@@ -669,4 +702,18 @@ if (OSL_BUILD_TESTS AND BUILD_TESTING)
     target_include_directories (llvmutil_test  BEFORE PRIVATE ${OpenImageIO_INCLUDES})
     set_target_properties (llvmutil_test PROPERTIES FOLDER "Unit Tests")
     add_test (unit_llvmutil ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/llvmutil_test)
+
+    # Check the AMDGPU device shadeops of each architecture against the host
+    # shadeops bitcode. Needs no GPU.
+    if (OSL_ENABLE_AMDGPU)
+        foreach (arch ${OSL_HIP_TARGET_ARCHS})
+            add_test (NAME amdgpu-shadeops-${arch}
+                COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_SOURCE_DIR}/src/build-scripts/check-amdgpu-shadeops.py"
+                    ${OSL_AMDGPU_LLVM_DIS}
+                    "${CMAKE_CURRENT_BINARY_DIR}/osl_llvm_compiled_ops.bc"
+                    ${arch} ${OSL_AMDGPU_CODE_OBJECT_VERSION}
+                    "${CMAKE_CURRENT_BINARY_DIR}/shadeops_amdgpu_${arch}.ll")
+        endforeach ()
+    endif ()
 endif ()

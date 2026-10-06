@@ -197,6 +197,75 @@ else ()
 endif ()
 
 
+# AMDGPU setup: the device shadeops are compiled with OSL's own clang in HIP
+# mode, and the ROCm device libraries (ocml, ockl, oclc_*) are linked in by
+# the clang driver. No HIP runtime is needed to build them.
+if (OSL_ENABLE_AMDGPU)
+    if (NOT USE_LLVM_BITCODE)
+        message (FATAL_ERROR "OSL_ENABLE_AMDGPU requires USE_LLVM_BITCODE=ON")
+    endif ()
+    if (NOT LLVM_TARGETS MATCHES "AMDGPU")
+        message (FATAL_ERROR "The AMDGPU target is not available in the provided LLVM build")
+    endif ()
+    # Code object version 6, which the device shadeops are built for, needs
+    # LLVM 19 or newer.
+    if (LLVM_VERSION VERSION_LESS 19.0)
+        message (FATAL_ERROR "OSL_ENABLE_AMDGPU requires LLVM 19 or newer (you have LLVM ${LLVM_VERSION})")
+    endif ()
+    foreach (arch ${OSL_HIP_TARGET_ARCHS})
+        if (NOT arch MATCHES "^gfx[0-9a-f]+$")
+            message (FATAL_ERROR "Invalid AMDGPU architecture '${arch}' in OSL_HIP_TARGET_ARCHS")
+        endif ()
+    endforeach ()
+
+    if (NOT EXISTS "${ROCM_PATH}/include/hip")
+        message (FATAL_ERROR "ROCM_PATH (\"${ROCM_PATH}\") does not contain the HIP headers")
+    endif ()
+    find_path (OSL_ROCM_DEVICE_LIB_PATH NAMES ocml.bc
+               HINTS "${ROCM_PATH}/lib/llvm/amdgcn/bitcode"
+                     "${ROCM_PATH}/llvm/amdgcn/bitcode"
+                     "${ROCM_PATH}/amdgcn/bitcode"
+               NO_DEFAULT_PATH)
+    if (NOT OSL_ROCM_DEVICE_LIB_PATH)
+        message (FATAL_ERROR "Cannot find the ROCm device libraries (ocml.bc) under ROCM_PATH (\"${ROCM_PATH}\")")
+    endif ()
+    set (required_device_libs ocml ockl oclc_abi_version_600)
+    foreach (arch ${OSL_HIP_TARGET_ARCHS})
+        string (REPLACE "gfx" "" isa "${arch}")
+        list (APPEND required_device_libs oclc_isa_version_${isa})
+    endforeach ()
+    foreach (lib ${required_device_libs})
+        if (NOT EXISTS "${OSL_ROCM_DEVICE_LIB_PATH}/${lib}.bc")
+            message (FATAL_ERROR "Missing ROCm device library ${OSL_ROCM_DEVICE_LIB_PATH}/${lib}.bc")
+        endif ()
+    endforeach ()
+
+    # Bitcode is not readable by an older LLVM, so the tools that produce the
+    # embedded shadeops must be exactly OSL's LLVM version.
+    foreach (var_tool OSL_AMDGPU_CLANG:clang++ OSL_AMDGPU_LLVM_LINK:llvm-link
+                      OSL_AMDGPU_OPT:opt OSL_AMDGPU_LLVM_DIS:llvm-dis)
+        string (REPLACE ":" ";" var_tool "${var_tool}")
+        list (GET var_tool 0 var)
+        list (GET var_tool 1 tool)
+        find_program (${var} NAMES ${tool} PATHS "${LLVM_DIRECTORY}/bin"
+                      NO_DEFAULT_PATH)
+        if (NOT ${var})
+            message (FATAL_ERROR "Cannot find ${tool} in ${LLVM_DIRECTORY}/bin")
+        endif ()
+        execute_process (COMMAND "${${var}}" --version
+                         OUTPUT_VARIABLE tool_version ERROR_QUIET)
+        if (NOT tool_version MATCHES "version ([0-9]+\\.[0-9]+\\.[0-9]+)"
+            OR NOT CMAKE_MATCH_1 VERSION_EQUAL LLVM_VERSION)
+            message (FATAL_ERROR "${${var}} must be LLVM ${LLVM_VERSION}")
+        endif ()
+    endforeach ()
+    message (STATUS "AMDGPU device shadeops for: ${OSL_HIP_TARGET_ARCHS}")
+    message (STATUS "ROCm device libraries: ${OSL_ROCM_DEVICE_LIB_PATH}")
+else ()
+    message (STATUS "AMDGPU device shadeops disabled")
+endif ()
+
+
 ###########################################################################
 # Tessil/robin-map
 
