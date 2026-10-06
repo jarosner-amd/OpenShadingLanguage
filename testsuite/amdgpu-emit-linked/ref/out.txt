@@ -49,9 +49,9 @@ check amdgpu_g2_gfx1100.ll:
   every define has target-cpu: yes
   code object version: 600
   host pointers: none
-  declares osl noise: yes
-  osl functions declared: osl_noise_fv
-  osl functions called: osl_noise_fv
+  declares osl noise: no
+  osl functions declared: none
+  osl functions called: none
 check amdgpu_g2_gfx1201.ll:
   triple: amdgcn-amd-amdhsa
   exports: 3
@@ -62,8 +62,8 @@ check amdgpu_g2_gfx1201.ll:
   every define has target-cpu: yes
   code object version: 600
   host pointers: none
-  declares osl noise: yes
-  osl functions declared: osl_noise_fv
-  osl functions called: osl_noise_fv
+  declares osl noise: no
+  osl functions declared: none
+  osl functions called: none
 check amdgpu_g3_gfx1201.bc:
   bitcode magic: ok

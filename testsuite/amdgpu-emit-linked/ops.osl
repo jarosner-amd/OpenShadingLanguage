@@ -3,9 +3,8 @@
 // https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
 
 // A shader that calls shadeops on values that are only known at run time.
-// sin and pow come from llvm_ops.cpp, whose device version is linked into
-// the artifacts and inlined. noise comes from a source the device shadeops
-// do not include yet, so it stays an external call.
+// The device versions of sin, pow and noise are linked into the artifacts
+// and inlined, so no shadeop is left as an external call.
 shader
 ops (output color Cout = 0)
 {
