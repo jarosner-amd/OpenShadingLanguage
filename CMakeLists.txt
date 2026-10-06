@@ -123,6 +123,11 @@ message(STATUS "OSL_USE_OPTIX: ${OSL_USE_OPTIX}")
 set (OPTIX_EXTRA_LIBS CACHE STRING "Extra lib targets needed for OptiX")
 set (CUDA_EXTRA_LIBS CACHE STRING "Extra lib targets needed for CUDA")
 set (CUDA_TARGET_ARCH "sm_60" CACHE STRING "CUDA GPU architecture (e.g. sm_50)")
+option (OSL_ENABLE_AMDGPU "Embed AMDGPU device shadeops (needs USE_LLVM_BITCODE and the ROCm device libraries)" OFF)
+set (OSL_HIP_TARGET_ARCHS "gfx1100;gfx1201" CACHE STRING
+     "AMDGPU architectures to build device shadeops for")
+set (ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH
+     "ROCm installation that provides the HIP headers and device libraries")
 set (OSL_SHADER_INSTALL_DIR "${CMAKE_INSTALL_FULL_DATADIR}/${PROJECT_NAME}/shaders"
      CACHE STRING "Directory where shaders will be installed")
 set (OSL_PTX_INSTALL_DIR "${CMAKE_INSTALL_FULL_DATADIR}/${PROJECT_NAME}/ptx"
@@ -204,6 +209,7 @@ include (pythonutils)
 include (externalpackages)
 include (flexbison)
 include (cuda_macros)
+include (hip_macros)
 include (OSL_llvm_macros)
 
 # Include all our testing apparatus and utils, but not if it's a subproject
