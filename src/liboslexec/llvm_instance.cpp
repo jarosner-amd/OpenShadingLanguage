@@ -24,8 +24,18 @@
 #include <llvm/MC/MCSubtargetInfo.h>
 #include <llvm/Target/TargetMachine.h>
 
-#if OSL_USE_OPTIX
+#if OSL_USE_OPTIX || defined(OSL_LLVM_AMDGPU_BITCODE)
 #    include <llvm/Linker/Linker.h>
+#endif
+
+#ifdef OSL_LLVM_AMDGPU_BITCODE
+#    include "amdgpu_shadeops.h"
+#    include <llvm/IR/DiagnosticInfo.h>
+#    include <llvm/IR/DiagnosticPrinter.h>
+#    include <llvm/IR/Verifier.h>
+#    include <llvm/Support/raw_ostream.h>
+#    include <llvm/Transforms/IPO/Internalize.h>
+#    include <llvm/Transforms/Utils/Cloning.h>
 #endif
 
 // Create external declarations for all built-in funcs we may call from LLVM
@@ -2142,8 +2152,9 @@ bool
 BackendLLVM::setup_module()
 {
     if (is_amdgpu_backend()) {
-        // There is no AMDGPU shadeops bitcode yet, so start from an empty
-        // module. Nothing is JIT compiled on this path -- the group is
+        // Start from an empty module. Device shadeops, if this build has
+        // them, are linked in per architecture when the artifacts are
+        // emitted. Nothing is JIT compiled on this path -- the group is
         // emitted as an artifact -- so no ExecutionEngine is created either.
         //
         // This path does not take the OSL_LLVM_NO_BITCODE lock below. That
@@ -2368,14 +2379,13 @@ BackendLLVM::setup_module()
 bool
 BackendLLVM::seed_empty_module_for_gpu()
 {
-#ifndef OSL_LLVM_NO_BITCODE
+#if !defined(OSL_LLVM_NO_BITCODE) && !defined(OSL_LLVM_AMDGPU_BITCODE)
     // In a build with shadeops bitcode, most shadeops are declared only by
-    // that bitcode module, not by builtindecl.h. This path starts from an
-    // empty module and has no device shadeops bitcode to link in yet, so the
-    // first call to one of them would find no declaration. Fail clearly here
-    // instead.
+    // that bitcode module, not by builtindecl.h. This build has no AMDGPU
+    // shadeops bitcode to take the declarations from, so the first call to
+    // one of them would find no declaration. Fail clearly here instead.
     shadingcontext()->errorfmt(
-        "Cannot compile shader group \"{}\" for AMDGPU: this OSL was built with USE_LLVM_BITCODE=ON, which the AMDGPU backend does not support yet",
+        "Cannot compile shader group \"{}\" for AMDGPU: this OSL was built with USE_LLVM_BITCODE=ON but without OSL_ENABLE_AMDGPU",
         group().name());
     return false;
 #else
@@ -2418,6 +2428,17 @@ BackendLLVM::seed_empty_module_for_gpu()
                 group().name(), arch);
             return false;
         }
+#    ifdef OSL_LLVM_AMDGPU_BITCODE
+        // The device shadeops are built for specific architectures only, so
+        // there is none for the generic target either.
+        if (find_amdgpu_shadeops(arch).empty()) {
+            shadingcontext()->errorfmt(
+                "Cannot compile shader group \"{}\" for AMDGPU: this OSL has no device shadeops for architecture \"{}\" (it has: {})",
+                group().name(), arch.empty() ? "generic" : arch,
+                embedded_amdgpu_archs());
+            return false;
+        }
+#    endif
     }
 
     // Take both the triple and the data layout from the target machine, so
@@ -2430,6 +2451,35 @@ BackendLLVM::seed_empty_module_for_gpu()
     ll.module()->setTargetTriple(tm->getTargetTriple());
 #    endif
     ll.module()->setDataLayout(tm->createDataLayout());
+
+#    ifdef OSL_LLVM_AMDGPU_BITCODE
+    // With shadeops bitcode, builtindecl.h does not declare most shadeops,
+    // so declare the ones the device shadeops define. Every architecture's
+    // shadeops have the same prototypes, and the bodies are linked in per
+    // architecture later, so any architecture's bitcode serves here. The
+    // lazily loaded module reads no function bodies.
+    cspan<unsigned char> bc = find_amdgpu_shadeops(archs.front());
+    std::string err;
+    std::unique_ptr<llvm::Module> shadeops(
+        ll.module_from_bitcode((const char*)bc.data(), bc.size(),
+                               "shadeops_amdgpu", &err));
+    if (!shadeops) {
+        shadingcontext()->errorfmt(
+            "Cannot compile shader group \"{}\" for AMDGPU: could not read the device shadeops: {}",
+            group().name(), err);
+        return false;
+    }
+    for (const llvm::Function& fn : *shadeops) {
+        if (fn.isDeclaration() || fn.hasLocalLinkage() || fn.isIntrinsic()
+            || fn.getCallingConv() == llvm::CallingConv::AMDGPU_KERNEL)
+            continue;
+        llvm::Function* decl
+            = llvm::Function::Create(fn.getFunctionType(),
+                                     llvm::GlobalValue::ExternalLinkage,
+                                     fn.getName(), ll.module());
+        decl->setCallingConv(fn.getCallingConv());
+    }
+#    endif
     return true;
 #endif
 }
@@ -2449,6 +2499,155 @@ BackendLLVM::apply_arch_attributes(string_view arch)
             fn.addFnAttr("target-cpu", cpu);
     }
 }
+
+
+
+#ifdef OSL_LLVM_AMDGPU_BITCODE
+namespace {
+
+// Collects error diagnostics instead of letting LLVM's default handler print
+// them and exit the process.
+struct CollectErrors final : public llvm::DiagnosticHandler {
+    std::string& errors;
+    explicit CollectErrors(std::string& errors) : errors(errors) {}
+    bool handleDiagnostics(const llvm::DiagnosticInfo& info) override
+    {
+        if (info.getSeverity() == llvm::DS_Error) {
+            llvm::raw_string_ostream os(errors);
+            llvm::DiagnosticPrinterRawOStream printer(os);
+            info.print(printer);
+            os << "\n";
+        }
+        return true;
+    }
+};
+
+}  // namespace
+
+
+
+std::unique_ptr<llvm::Module>
+BackendLLVM::link_amdgpu_shadeops(string_view arch)
+{
+    const GPUTargetDesc& desc = gpu_target();
+    std::string arch_str(arch);
+
+    std::string err;
+    cspan<unsigned char> bc = find_amdgpu_shadeops(arch);
+    std::unique_ptr<llvm::Module> shadeops(
+        ll.module_from_bitcode((const char*)bc.data(), bc.size(),
+                               "shadeops_amdgpu", &err));
+    if (!shadeops) {
+        shadingcontext()->errorfmt(
+            "Cannot compile shader group \"{}\" for AMDGPU architecture \"{}\": could not read the device shadeops: {}",
+            group().name(), arch, err);
+        return nullptr;
+    }
+
+    std::unique_ptr<llvm::Module> module = llvm::CloneModule(*ll.module());
+
+    // Check what would otherwise make the link fail or the result wrong,
+    // so that it is reported as an error for this group.
+    const char* mismatch = nullptr;
+    if (shadeops->getTargetTriple() != module->getTargetTriple())
+        mismatch = "target triple";
+    else if (shadeops->getDataLayout() != module->getDataLayout())
+        mismatch = "data layout";
+    else {
+        auto* cov = llvm::mdconst::extract_or_null<llvm::ConstantInt>(
+            shadeops->getModuleFlag("amdhsa_code_object_version"));
+        if (!cov
+            || cov->getZExtValue() != uint64_t(desc.code_obj_version) * 100)
+            mismatch = "code object version";
+    }
+    for (const llvm::Function& fn : *module) {
+        if (mismatch)
+            break;
+        const llvm::Function* def = shadeops->getFunction(fn.getName());
+        if (fn.isDeclaration() && def && !def->isDeclaration()
+            && def->getFunctionType() != fn.getFunctionType())
+            mismatch = "function prototypes";
+    }
+    if (mismatch) {
+        shadingcontext()->errorfmt(
+            "Cannot compile shader group \"{}\" for AMDGPU architecture \"{}\": the device shadeops do not match the shader group ({})",
+            group().name(), arch, mismatch);
+        return nullptr;
+    }
+
+    // The inliner only inlines a function into a caller with the same
+    // target attributes, so give the group's own functions the ones the
+    // shadeops were built with.
+    llvm::Attribute features;
+    for (const llvm::Function& fn : *shadeops) {
+        if (!fn.isDeclaration()) {
+            features = fn.getFnAttribute("target-features");
+            break;
+        }
+    }
+    for (llvm::Function& fn : *module) {
+        if (fn.isDeclaration())
+            continue;
+        fn.addFnAttr("target-cpu", arch_str);
+        if (features.isValid())
+            fn.addFnAttr(features);
+        else
+            fn.removeFnAttr("target-features");
+    }
+
+    // HIP's -fgpu-rdc keeps a per-file marker global alive through
+    // llvm.compiler.used. The linker always brings these lists in, which
+    // would pull the markers into every artifact.
+    for (const char* name : { "llvm.used", "llvm.compiler.used" })
+        if (llvm::GlobalVariable* gv = shadeops->getNamedGlobal(name))
+            gv->eraseFromParent();
+
+    // Bring in only the shadeops the group uses, with internal linkage, so
+    // the group's entry points stay its only exports.
+    std::string link_errors;
+    llvm::LLVMContext& ctx = module->getContext();
+    std::unique_ptr<llvm::DiagnosticHandler> saved_handler
+        = ctx.getDiagnosticHandler();
+    ctx.setDiagnosticHandler(std::make_unique<CollectErrors>(link_errors));
+    bool failed = llvm::Linker::linkModules(
+        *module, std::move(shadeops), llvm::Linker::Flags::LinkOnlyNeeded,
+        [](llvm::Module& m, const llvm::StringSet<>& imported) {
+            llvm::internalizeModule(m, [&](const llvm::GlobalValue& gv) {
+                return !gv.hasName() || !imported.count(gv.getName());
+            });
+        });
+    ctx.setDiagnosticHandler(std::move(saved_handler));
+    if (failed) {
+        shadingcontext()->errorfmt(
+            "Cannot compile shader group \"{}\" for AMDGPU architecture \"{}\": linking the device shadeops failed: {}",
+            group().name(), arch, link_errors);
+        return nullptr;
+    }
+
+    // Optimize after the link, with this architecture's target machine, so
+    // the shadeops are inlined and the target's own cost model is used.
+    llvm::TargetMachine* tm = ll.target_machine_for(desc, arch);
+    if (!tm) {
+        shadingcontext()->errorfmt(
+            "Cannot compile shader group \"{}\" for AMDGPU architecture \"{}\": could not create an LLVM target machine",
+            group().name(), arch);
+        return nullptr;
+    }
+    ll.optimize_module_for_target(module.get(), tm,
+                                  shadingsys().llvm_optimize(), &err);
+    std::string verify_errors;
+    llvm::raw_string_ostream verify_os(verify_errors);
+    bool broken = llvm::verifyModule(*module, &verify_os);
+    verify_os.flush();
+    if (!err.empty() || broken) {
+        shadingcontext()->errorfmt(
+            "Cannot compile shader group \"{}\" for AMDGPU architecture \"{}\": the linked module is not valid: {}{}",
+            group().name(), arch, err, verify_errors);
+        return nullptr;
+    }
+    return module;
+}
+#endif
 
 
 
@@ -2490,16 +2689,40 @@ BackendLLVM::emit_gpu_artifacts(const GroupFunctions& funcs)
     }
 
     // One artifact per requested architecture. The data layout is the same
-    // for all of them, so what differs is the "target-cpu" attribute, which a
-    // downstream consumer needs in order to compile the bitcode for a real
-    // device. Nothing here changes the module's structure, so the same module
-    // is reused for each architecture instead of being cloned.
+    // for all of them. With device shadeops, each architecture has its own
+    // shadeops bitcode, so each artifact is a copy of the module with that
+    // bitcode linked in. Without them, only the "target-cpu" attribute
+    // differs, which a downstream consumer needs in order to compile the
+    // bitcode for a real device, so the same module is reused for each
+    // architecture instead of being copied.
     std::vector<std::string> archs = requested_archs(desc);
 
     for (const std::string& arch : archs) {
+#ifdef OSL_LLVM_AMDGPU_BITCODE
+        std::unique_ptr<llvm::Module> linked = link_amdgpu_shadeops(arch);
+        if (!linked) {
+            group().clear_gpu_artifacts();
+            return false;
+        }
+        llvm::Module* module = linked.get();
+        // Optimizing after the link must not have removed or hidden an
+        // entry point.
+        for (const GPUExportedSymbol& sym : exports) {
+            const llvm::Function* fn = module->getFunction(sym.symbol_name);
+            if (!fn || fn->isDeclaration() || !fn->hasExternalLinkage()) {
+                shadingcontext()->errorfmt(
+                    "Internal error: shader group \"{}\" lost its entry point \"{}\" for AMDGPU architecture \"{}\"",
+                    group().name(), sym.symbol_name, arch);
+                group().clear_gpu_artifacts();
+                return false;
+            }
+        }
+#else
         apply_arch_attributes(arch);
+        llvm::Module* module = ll.module();
+#endif
         std::string payload;
-        if (!ll.emit_gpu_artifact(desc, ll.module(), payload)) {
+        if (!ll.emit_gpu_artifact(desc, module, payload)) {
             shadingcontext()->errorfmt(
                 "Could not emit the GPU artifact for shader group \"{}\", architecture \"{}\"",
                 group().name(), arch);
@@ -2511,7 +2734,7 @@ BackendLLVM::emit_gpu_artifacts(const GroupFunctions& funcs)
         CompiledGPUArtifact a;
         a.backend      = desc.backend;
         a.artifact     = desc.artifact;
-        a.triple       = llvm::Triple(ll.module()->getTargetTriple()).str();
+        a.triple       = llvm::Triple(module->getTargetTriple()).str();
         a.arch         = arch;
         a.llvm_version = OSL_LLVM_FULL_VERSION;
         // Recorded for the consumer, which applies it when it compiles and
@@ -2663,8 +2886,14 @@ BackendLLVM::optimize_module()
     }
 #endif
 
-    // Optimize the LLVM IR unless it's a do-nothing group.
-    if (!group().does_nothing()) {
+    // Optimize the LLVM IR unless it's a do-nothing group. With AMDGPU
+    // device shadeops, each architecture's artifact is optimized after its
+    // shadeops are linked in (link_amdgpu_shadeops), not here.
+    bool optimize_per_arch = false;
+#ifdef OSL_LLVM_AMDGPU_BITCODE
+    optimize_per_arch = is_amdgpu_backend();
+#endif
+    if (!group().does_nothing() && !optimize_per_arch) {
         ll.do_optimize();
     }
 
@@ -2870,7 +3099,10 @@ BackendLLVM::run()
     // saves memory, and has almost no effect on runtime.
     ll.execengine(NULL);
 
-    // N.B. Destroying the EE should have destroyed the module as well.
+    // N.B. Destroying the EE should have destroyed the module as well. An
+    // AMDGPU group has no EE, so its module is deleted here.
+    if (is_amdgpu_backend())
+        delete ll.module();
     ll.module(NULL);
 
     m_stat_llvm_jit_time += timer.lap();

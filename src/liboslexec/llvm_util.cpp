@@ -1938,7 +1938,8 @@ LLVM_Util::setup_optimization_passes(int optlevel, bool target_host)
 }
 
 void
-LLVM_Util::setup_new_optimization_passes(int optlevel, bool target_host)
+LLVM_Util::setup_new_optimization_passes(int optlevel, bool target_host,
+                                         llvm::TargetMachine* gpu_target_machine)
 {
     OSL_DEV_ONLY(std::cout << "setup_new_optimization_passes " << optlevel);
     OSL_ASSERT(m_new_pass_manager == nullptr);
@@ -1949,10 +1950,10 @@ LLVM_Util::setup_new_optimization_passes(int optlevel, bool target_host)
     // Create pass builder
     llvm::TargetMachine* target_machine = (target_host)
                                               ? execengine()->getTargetMachine()
-                                              : nullptr;
+                                              : gpu_target_machine;
     llvm::PassBuilder pass_builder(target_machine);
 
-    if (target_host) {
+    if (target_host || gpu_target_machine) {
         llvm::Triple ModuleTriple(module()->getTargetTriple());
         // Add an appropriate TargetLibraryInfo pass for the module's triple.
         llvm::TargetLibraryInfoImpl TLII(ModuleTriple);
@@ -2391,6 +2392,33 @@ LLVM_Util::do_optimize(std::string* out_err)
     // New pass manager
     m_new_pass_manager->module_pass_manager.run(
         *m_llvm_module, m_new_pass_manager->module_analysis_manager);
+}
+
+
+
+void
+LLVM_Util::optimize_module_for_target(llvm::Module* module,
+                                      llvm::TargetMachine* target_machine,
+                                      int optlevel, std::string* err)
+{
+    OSL_ASSERT(module && target_machine);
+    // Build and run a separate pass pipeline for this module, then put the
+    // current module and its passes back.
+    NewPassManager* saved_passes = m_new_pass_manager;
+    llvm::Module* saved_module   = m_llvm_module;
+    bool saved_finalized         = m_ModuleIsFinalized;
+    bool saved_pruned            = m_ModuleIsPruned;
+    m_new_pass_manager           = nullptr;
+    m_llvm_module                = module;
+
+    setup_new_optimization_passes(optlevel, false, target_machine);
+    do_optimize(err);
+
+    delete m_new_pass_manager;
+    m_new_pass_manager  = saved_passes;
+    m_llvm_module       = saved_module;
+    m_ModuleIsFinalized = saved_finalized;
+    m_ModuleIsPruned    = saved_pruned;
 }
 
 

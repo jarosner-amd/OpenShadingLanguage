@@ -561,12 +561,18 @@ macro (osl_add_all_tests)
     endif ()
 
     # AMDGPU emit-only tests: compile a shader group for AMDGPU without
-    # running it, so they need no GPU and no ROCm. The AMDGPU path needs
-    # USE_LLVM_BITCODE=OFF and an LLVM built with the AMDGPU target. The
-    # tests use gfx1201, which older LLVM releases do not know.
-    if (NOT USE_LLVM_BITCODE AND LLVM_TARGETS MATCHES "AMDGPU"
-        AND LLVM_VERSION VERSION_GREATER_EQUAL 18.0)
-        TESTSUITE ( amdgpu-emit )
+    # running it, so they need no GPU. Without USE_LLVM_BITCODE, the
+    # shadeops stay external calls and no ROCm is needed. With it, the build
+    # must have the AMDGPU device shadeops, which are linked into each
+    # artifact. Both need an LLVM built with the AMDGPU target. The
+    # artifacts use code object version 6, which needs LLVM 19.
+    if (LLVM_TARGETS MATCHES "AMDGPU"
+        AND LLVM_VERSION VERSION_GREATER_EQUAL 19.0)
+        if (NOT USE_LLVM_BITCODE)
+            TESTSUITE ( amdgpu-emit )
+        elseif (OSL_ENABLE_AMDGPU)
+            TESTSUITE ( amdgpu-emit-linked )
+        endif ()
     endif ()
 
     # Some regression tests have a lot of combinations and may need more time to finish

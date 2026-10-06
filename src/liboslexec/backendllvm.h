@@ -90,11 +90,13 @@ public:
     void emit_or_jit(const GroupFunctions& funcs);
 
     /// Create an empty Module and give it the triple and data layout of the
-    /// GPU target. Used by the AMDGPU path, which has no shadeops bitcode to
-    /// start from yet. Reports an error and returns false if OSL was built
-    /// with shadeops bitcode, if the artifact kind is not bitcode or IR, if
-    /// no target machine can be created, or if a requested architecture name
-    /// is unknown to LLVM.
+    /// GPU target. Used by the AMDGPU path. In a build with embedded AMDGPU
+    /// shadeops, the Module also gets declarations of those shadeops, and
+    /// every requested architecture must have them. Reports an error and
+    /// returns false if OSL was built with shadeops bitcode but without
+    /// AMDGPU shadeops, if the artifact kind is not bitcode or IR, if no
+    /// target machine can be created, or if a requested architecture name
+    /// is unknown to LLVM or has no embedded shadeops.
     bool seed_empty_module_for_gpu();
 
     /// Emit one artifact per requested architecture and store them on the
@@ -104,6 +106,11 @@ public:
     /// Mark every function definition in the module for `arch`. Clears the
     /// mark when `arch` is empty.
     void apply_arch_attributes(string_view arch);
+
+    /// Return a copy of the module with the embedded AMDGPU shadeops for
+    /// `arch` linked in, optimized for `arch`. Reports an error and returns
+    /// nullptr on failure.
+    std::unique_ptr<llvm::Module> link_amdgpu_shadeops(string_view arch);
 
 
 
