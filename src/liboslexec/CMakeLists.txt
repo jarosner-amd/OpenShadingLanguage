@@ -254,8 +254,16 @@ if (USE_LLVM_BITCODE)
         # The AMDGPU device shadeops are compiled once per GPU architecture
         # and embedded in liboslexec. When a shader group is compiled for
         # AMDGPU, the bitcode for each requested architecture is linked into
-        # that architecture's artifact. Only llvm_ops.cpp so far.
-        set (amdgpu_shadeops_srcs ${CMAKE_SOURCE_DIR}/src/liboslexec/llvm_ops.cpp)
+        # that architecture's artifact. Only the shadeops that need nothing
+        # from the renderer so far: the ones in opcolor, opmatrix,
+        # pointcloud, opclosure and optexture call renderer services.
+        set (amdgpu_shadeops_srcs
+            ${CMAKE_SOURCE_DIR}/src/liboslexec/llvm_ops.cpp
+            ${CMAKE_SOURCE_DIR}/src/liboslexec/opnoise.cpp
+            ${CMAKE_SOURCE_DIR}/src/liboslexec/opspline.cpp
+            ${CMAKE_SOURCE_DIR}/src/liboslnoise/gabornoise.cpp
+            ${CMAKE_SOURCE_DIR}/src/liboslnoise/simplexnoise.cpp
+        )
         # OpenImageIO first, as for the liboslexec target itself, so that the
         # OpenImageIO we build against is not hidden by another copy that
         # may sit in a dependency's include directory.
