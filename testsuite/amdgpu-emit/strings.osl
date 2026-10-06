@@ -1,0 +1,15 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// A string array read at an index that is only known at run time, so the
+// constant array stays in the emitted AMDGPU code. A string constant holds
+// a string hash, never an address, so it must not appear as a pointer.
+shader
+strings (output color Cout = 0)
+{
+    string names[3] = { "red", "green", "blue" };
+    int i = int(u * 2.99);
+    if (names[i] == "green")
+        Cout = color(0, 1, 0);
+}
