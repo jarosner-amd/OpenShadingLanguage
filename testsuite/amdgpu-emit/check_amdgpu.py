@@ -17,7 +17,7 @@ def check_bitcode(data):
     print("  bitcode magic: " + ("ok" if data[:4] == b"BC\xc0\xde" else "BAD"))
 
 
-def check_llvm_ir(text):
+def check_llvm_ir(text, linked):
     triple = re.search(r'^target triple = "([^"]*)"', text, re.M)
     print("  triple: " + (triple.group(1) if triple else "MISSING"))
 
@@ -54,9 +54,8 @@ def check_llvm_ir(text):
     print("  target-cpu: " + (" ".join(sorted(cpus)) if cpus else "none"))
     print("  every define has target-cpu: "
           + ("yes" if defines and with_cpu == defines else "no"))
-    print("  code object version 500: "
-          + ("yes" if re.search(r'"amdhsa_code_object_version", i32 500\b',
-                                text) else "no"))
+    cov = re.search(r'"amdhsa_code_object_version", i32 (\d+)', text)
+    print("  code object version: " + (cov.group(1) if cov else "MISSING"))
 
     # A non-zero integer turned into a pointer is almost certainly a host
     # address that means nothing on the GPU. This catches both the constant
@@ -68,12 +67,27 @@ def check_llvm_ir(text):
           + ("yes" if re.search(r"^declare\b.*@osl_\w*noise\w*\(", text, re.M)
              else "no"))
 
+    # With the device shadeops linked in, every shadeop they define is
+    # inlined, so any osl_* function still declared or called comes from a
+    # source the device shadeops do not include yet.
+    if linked:
+        declared = set(re.findall(r"^declare\b.*@(osl_\w+)\(", text, re.M))
+        called = set(re.findall(r"\bcall\b[^@\n]*@(osl_\w+)\(", text))
+        print("  osl functions declared: "
+              + (" ".join(sorted(declared)) if declared else "none"))
+        print("  osl functions called: "
+              + (" ".join(sorted(called)) if called else "none"))
+
 
 def main():
-    if len(sys.argv) != 2:
-        print("usage: check_amdgpu.py <artifact.bc|artifact.ll>")
+    args = sys.argv[1:]
+    linked = "--linked" in args
+    if linked:
+        args.remove("--linked")
+    if len(args) != 1:
+        print("usage: check_amdgpu.py [--linked] <artifact.bc|artifact.ll>")
         return 1
-    path = sys.argv[1]
+    path = args[0]
     try:
         with open(path, "rb") as f:
             data = f.read()
@@ -87,7 +101,7 @@ def main():
     if path.endswith(".bc"):
         check_bitcode(data)
     else:
-        check_llvm_ir(data.decode("utf-8", "replace"))
+        check_llvm_ir(data.decode("utf-8", "replace"), linked)
     return 0
 
 

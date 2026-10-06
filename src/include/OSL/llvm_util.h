@@ -324,6 +324,14 @@ public:
     /// Run the optimization passes.
     void do_optimize(std::string* err = NULL);
 
+    /// Optimize module, which need not be the current module, for the GPU
+    /// target described by target_machine, with the same pipeline that
+    /// setup_optimization_passes(optlevel) builds. The current module and
+    /// its optimization passes are left unchanged.
+    void optimize_module_for_target(llvm::Module* module,
+                                    llvm::TargetMachine* target_machine,
+                                    int optlevel, std::string* err = nullptr);
+
     /// Retrieve a callable pointer to the JITed version of a function.
     /// This will JIT the function if it hasn't already done so. Be sure
     /// you have already called do_optimize() if you want optimization.
@@ -1286,7 +1294,10 @@ private:
     llvm::Value* op_combine_4x_vectors(llvm::Value* half_vec_1,
                                        llvm::Value* half_vec_2);
 
-    void setup_new_optimization_passes(int optlevel, bool target_host);
+    // gpu_target_machine is used only when target_host is false.
+    void setup_new_optimization_passes(int optlevel, bool target_host,
+                                       llvm::TargetMachine* gpu_target_machine
+                                       = nullptr);
 };
 
 
