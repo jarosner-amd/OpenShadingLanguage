@@ -11,7 +11,8 @@ well, but we don't officially support or test other than these platforms.
 Shader execution is supported on the native architectures of those x86_64 and
 aarch64 platforms, a special batched 4-, 8- or 16-wide SIMD execution mode
 requiring x86_64 with SSE2, AVX/AVX2 or AVX-512 instructions, as well as on
-NVIDIA GPUs using Cuda+OptiX.
+NVIDIA GPUs using Cuda+OptiX. OSL can also compile shader groups for AMD
+GPUs (experimental and compile-only, see [AMD GPUs](#amd-gpus) below).
 
 Dependencies
 ------------
@@ -55,6 +56,20 @@ NEW or CHANGED minimum dependencies since the last major release are **bold**.
     * [OptiX](https://developer.nvidia.com/rtx/ray-tracing/optix) 7.0 or higher.
     * [Cuda](https://developer.nvidia.com/cuda-downloads) 9.0 or higher. It is
       recommended that you use 11.0 or higher.
+
+* (optional) For compiling shader groups for AMD GPUs with the device
+  shadeops built in (`OSL_ENABLE_AMDGPU`, experimental, see
+  [AMD GPUs](#amd-gpus) below):
+    * LLVM 19 or newer with the AMDGPU target, and the `clang++`,
+      `llvm-link`, `opt`, `llvm-dis` and `llc` tools from that same LLVM
+      installation (configure checks that their versions match exactly).
+    * [ROCm](https://rocm.docs.amd.com/) HIP headers and device libraries,
+      including `oclc_abi_version_600.bc` and an `oclc_isa_version_<N>.bc`
+      for each architecture. OSL's LLVM must be able to read this bitcode,
+      so ROCm's own LLVM must not be newer than OSL's; configure checks
+      this.
+    * An OpenImageIO with HIP device support (device macros and fast-math
+      functions for HIP). This is not yet in an OpenImageIO release.
 
 * [Imath](https://github.com/AcademySoftwareFoundation/Imath) 3.1 or newer.
 * [Flex](https://github.com/westes/flex) 2.5.35 or newer and
@@ -136,6 +151,64 @@ Here are the steps to check out, build, and test the OSL distribution:
    test suite with:
 
         make test
+
+AMD GPUs
+--------
+
+AMD GPU support is experimental and compile-only. OSL can compile a shader
+group to AMDGPU LLVM bitcode (or LLVM IR text), one artifact per GPU
+architecture, for a renderer to finish and run. OSL does not run shaders on
+AMD GPUs itself.
+
+A renderer selects it with the ShadingSystem attributes `gpu_backend`
+("amdgpu"), `gpu_archs` and `gpu_artifact_kind` ("bitcode", the default, or
+"llvmir"), and reads the results with the shader group attributes
+`gpu_num_artifacts` and `gpu_artifact:N:...`; see `oslexec.h`. These
+attributes cannot be changed after the first shader group is compiled, and
+"amdgpu" cannot be used with a renderer that supports OptiX.
+
+`testshade --amdgpu` does the same from the command line (not together with
+`--optix` or `--batched`), for example:
+
+    testshade --amdgpu --amdgpu-arch gfx1100 --save-amdgpu \
+              --groupname mygroup -o Cout null myshader
+
+`-o` names the shader output to compile for; replace `Cout` with an output
+of your shader. This writes `amdgpu_mygroup_gfx1100.bc` to the current
+directory.
+
+This needs LLVM 19 or newer with the AMDGPU target, and one of two builds:
+
+* With `USE_LLVM_BITCODE=OFF` (the default on Windows), nothing more is
+  needed, but the OSL shadeops (the library functions shaders call) stay
+  external declarations in the artifact.
+* With `USE_LLVM_BITCODE=ON`, `OSL_ENABLE_AMDGPU` must also be ON, and the
+  shadeops are built into each artifact. Otherwise compiling for AMDGPU
+  fails with an error.
+
+To build the shadeops in, configure with:
+
+    cmake -B build -S . -DUSE_LLVM_BITCODE=ON -DOSL_ENABLE_AMDGPU=ON \
+          -DROCM_PATH=/opt/rocm -DOSL_HIP_TARGET_ARCHS="gfx1100;gfx1201"
+
+* `OSL_ENABLE_AMDGPU` (default OFF) compiles the device shadeops for each
+  architecture in `OSL_HIP_TARGET_ARCHS` with LLVM's `clang++` in HIP mode,
+  links the ROCm device libraries into them, and embeds the result in
+  liboslexec. It needs `USE_LLVM_BITCODE=ON`.
+* `OSL_HIP_TARGET_ARCHS` (default "gfx1100;gfx1201") lists the
+  architectures. Artifacts can then be compiled for these architectures
+  only.
+* `ROCM_PATH` (default: the `ROCM_PATH` environment variable at the first
+  configure) is the ROCm installation with the HIP headers and device
+  libraries.
+
+The shadeops in `opmatrix.cpp`, `opcolor.cpp`, `optexture.cpp`,
+`pointcloud.cpp` and `opclosure.cpp` are not built in yet. Some of their
+functions need the renderer, so these files are left out as a whole. That
+covers all matrix operations (including multiply, transpose and
+determinant), all color functions, texture and trace, point clouds and
+closures. Calls to them stay external declarations, for the renderer to
+supply.
 
 Python binding backends
 -----------------------
