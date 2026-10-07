@@ -241,9 +241,11 @@ if (OSL_ENABLE_AMDGPU)
     endforeach ()
 
     # Bitcode is not readable by an older LLVM, so the tools that produce the
-    # embedded shadeops must be exactly OSL's LLVM version.
+    # embedded shadeops must be exactly OSL's LLVM version. The testsuite
+    # uses llc to compile the emitted artifacts, so the same applies to it.
     foreach (var_tool OSL_AMDGPU_CLANG:clang++ OSL_AMDGPU_LLVM_LINK:llvm-link
-                      OSL_AMDGPU_OPT:opt OSL_AMDGPU_LLVM_DIS:llvm-dis)
+                      OSL_AMDGPU_OPT:opt OSL_AMDGPU_LLVM_DIS:llvm-dis
+                      OSL_AMDGPU_LLC:llc)
         string (REPLACE ":" ";" var_tool "${var_tool}")
         list (GET var_tool 0 var)
         list (GET var_tool 1 tool)

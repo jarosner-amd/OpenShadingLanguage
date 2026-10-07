@@ -572,6 +572,15 @@ macro (osl_add_all_tests)
             TESTSUITE ( amdgpu-emit )
         elseif (OSL_ENABLE_AMDGPU)
             TESTSUITE ( amdgpu-emit-linked )
+            # The test compiles each artifact to a device object with llc.
+            foreach (_t amdgpu-emit-linked amdgpu-emit-linked.rs_bitcode
+                        amdgpu-emit-linked.opt
+                        amdgpu-emit-linked.opt.rs_bitcode)
+                if (TEST ${_t})
+                    set_property (TEST ${_t} APPEND PROPERTY ENVIRONMENT
+                                  OSL_AMDGPU_LLC=${OSL_AMDGPU_LLC})
+                endif ()
+            endforeach ()
         endif ()
     endif ()
 
