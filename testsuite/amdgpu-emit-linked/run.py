@@ -17,8 +17,12 @@ def amdgpu(group, shader, args):
     return testshade("-g 1 1 --groupname " + group + " --layer L --amdgpu "
                      + args + " --save-amdgpu -o Cout null " + shader)
 
+run_llc = os.path.join(os.path.abspath(test_source_dir), "run_llc.py")
+
+# Check what was emitted, then compile it to a device object with llc.
 def check(artifact):
-    return run_app('"' + pythonbin + '" "' + checker + '" --linked ' + artifact)
+    return (run_app('"' + pythonbin + '" "' + checker + '" --linked ' + artifact)
+            + run_app('"' + pythonbin + '" "' + run_llc + '" ' + artifact))
 
 archs = "--amdgpu-arch gfx1100 --amdgpu-arch gfx1201"
 command = amdgpu("g1", "test", archs + " --amdgpu-format llvmir")
