@@ -26,10 +26,14 @@ function ( MAKE_HIP_BITCODE src suffix arch generated_bc include_dirs )
 
     if (USE_FAST_MATH)
         # Not -ffast-math: with it, clang links the finite-only device
-        # libraries, and isnan/isinf checks may be folded away.
-        set (hip_math_flags -fno-math-errno -fapprox-func -fassociative-math
-             -freciprocal-math -fno-signed-zeros -fno-trapping-math
-             -fno-rounding-math -ffp-contract=fast)
+        # libraries, and isnan/isinf checks may be folded away. Also not
+        # -freciprocal-math or -fapprox-func: with either, a / b becomes
+        # a * (1/b) with a fast reciprocal, and 1/b overflows to Inf for a
+        # tiny b although a / b is finite, so safe_div returns 0 where the
+        # CPU returns the quotient.
+        set (hip_math_flags -fno-math-errno -fassociative-math
+             -fno-signed-zeros -fno-trapping-math -fno-rounding-math
+             -ffp-contract=fast)
     else ()
         set (hip_math_flags -fno-math-errno)
     endif ()
