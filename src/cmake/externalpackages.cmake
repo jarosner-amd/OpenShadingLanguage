@@ -261,6 +261,22 @@ if (OSL_ENABLE_AMDGPU)
             message (FATAL_ERROR "${${var}} must be LLVM ${LLVM_VERSION}")
         endif ()
     endforeach ()
+
+    # The device libraries are bitcode built by ROCm's own LLVM. If that is
+    # newer than OSL's, OSL's tools cannot read them, and the shadeops build
+    # would fail much later with a less clear error.
+    set (dis_out "${CMAKE_BINARY_DIR}/CMakeFiles/osl_rocm_devlib_check.ll")
+    foreach (lib ${required_device_libs})
+        execute_process (COMMAND "${OSL_AMDGPU_LLVM_DIS}"
+                                 "${OSL_ROCM_DEVICE_LIB_PATH}/${lib}.bc"
+                                 -o "${dis_out}"
+                         RESULT_VARIABLE dis_result
+                         ERROR_VARIABLE dis_error)
+        file (REMOVE "${dis_out}")
+        if (NOT dis_result EQUAL 0)
+            message (FATAL_ERROR "LLVM ${LLVM_VERSION} cannot read the ROCm device library ${OSL_ROCM_DEVICE_LIB_PATH}/${lib}.bc. ROCm was probably built with a newer LLVM; use a ROCm whose LLVM is not newer than OSL's. The error was: ${dis_error}")
+        endif ()
+    endforeach ()
     message (STATUS "AMDGPU device shadeops for: ${OSL_HIP_TARGET_ARCHS}")
     message (STATUS "ROCm device libraries: ${OSL_ROCM_DEVICE_LIB_PATH}")
 else ()
