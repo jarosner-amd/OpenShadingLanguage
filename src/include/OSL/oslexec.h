@@ -260,7 +260,12 @@ public:
     ///                              names separated by commas, or an array
     ///                              of strings. Duplicate names are dropped.
     ///                              Empty means one artifact for the generic
-    ///                              target. Names with feature suffixes,
+    ///                              target. If OSL was built with the AMDGPU
+    ///                              device shadeops (OSL_ENABLE_AMDGPU),
+    ///                              compiling a group fails for any
+    ///                              architecture they were not built for,
+    ///                              including the generic target. Names
+    ///                              with feature suffixes,
     ///                              such as "gfx90a:xnack+", are not
     ///                              accepted. In an "options" string the
     ///                              list must be in quotes, because a comma

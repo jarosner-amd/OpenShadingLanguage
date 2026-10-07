@@ -742,7 +742,7 @@ getargs(int argc, const char* argv[])
     ap.arg("--amdgpu", &use_amdgpu)
       .help("Compile for AMDGPU and emit the artifacts, without running the shader");
     ap.arg("--amdgpu-arch %L:ARCH", &amdgpu_archs)
-      .help("AMDGPU architecture to compile for, e.g. gfx1100 (repeatable; default: one generic artifact)");
+      .help("AMDGPU architecture to compile for, e.g. gfx1100 (repeatable; default: one generic artifact, which a build with the device shadeops rejects)");
     ap.arg("--amdgpu-format %s:FORMAT", &amdgpu_format)
       .help("AMDGPU artifact format: bitcode (default) or llvmir");
     ap.arg("--save-amdgpu", &save_amdgpu)
