@@ -68,15 +68,25 @@ def check_llvm_ir(text, linked):
              else "no"))
 
     # With the device shadeops linked in, every shadeop they define is
-    # inlined, so any osl_* function still declared or called comes from a
-    # source the device shadeops do not include yet.
+    # inlined, so any other osl_* function still declared or called comes
+    # from a source the device shadeops do not include yet. The group's own
+    # layer and init functions (osl_layer_group_*, osl_init_group_*) are not
+    # shadeops, and stay calls when the optimizer does not inline them, so
+    # they are left out.
     if linked:
-        declared = set(re.findall(r"^declare\b.*@(osl_\w+)\(", text, re.M))
-        called = set(re.findall(r"\bcall\b[^@\n]*@(osl_\w+)\(", text))
+        group_fn = re.compile(r"osl_(layer|init)_group_")
+        declared = {f for f in re.findall(r"^declare\b.*@(osl_\w+)\(", text,
+                                          re.M) if not group_fn.match(f)}
+        called = {f for f in re.findall(r"\bcall\b[^@\n]*@(osl_\w+)\(", text)
+                  if not group_fn.match(f)}
         print("  osl functions declared: "
               + (" ".join(sorted(declared)) if declared else "none"))
         print("  osl functions called: "
               + (" ".join(sorted(called)) if called else "none"))
+        # The renderer services the renderer must link in.
+        rs = set(re.findall(r"^declare\b.*@(rs_\w+)\(", text, re.M))
+        print("  renderer services declared: "
+              + (" ".join(sorted(rs)) if rs else "none"))
 
 
 def main():
