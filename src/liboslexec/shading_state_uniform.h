@@ -24,7 +24,7 @@ struct ShadingStateUniform {
     int m_max_warnings_per_thread;  ///< How many warnings to display per thread before giving up?
 };
 
-inline bool
+OSL_HOSTDEVICE inline bool
 get_unknown_coordsys_error(const OpaqueExecContextPtr oec)
 {
     auto ec                  = pvt::get_ec(oec);
@@ -32,7 +32,7 @@ get_unknown_coordsys_error(const OpaqueExecContextPtr oec)
     return ssu->m_unknown_coordsys_error;
 }
 
-inline ustringhash
+OSL_HOSTDEVICE inline ustringhash
 get_commonspace_synonym(const OpaqueExecContextPtr oec)
 {
     auto ec                  = pvt::get_ec(oec);
