@@ -1,0 +1,29 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// Texture, environment, trace and point cloud calls. They reach the renderer
+// only through rs_* functions, and the texture and trace options are filled
+// by option setters that are built into the AMDGPU device shadeops. With them
+// linked in, the artifact should declare only rs_* functions.
+//
+// gettextureinfo is left out on purpose: with runtime optimization on, the
+// optimizer folds it using the host texture system, so the artifact would
+// depend on host files.
+//
+// The s wrap name depends on u, so it is decoded on the device, not when the
+// shader is compiled. "firstchannel" is not 0, its default, so its setter is
+// not left out.
+shader lookups (string filename = "grid.tx", output color Cout = 0)
+{
+    string swrap = u > 0.5 ? "clamp" : "periodic";
+    color c = texture(filename, u, v, "swrap", swrap, "twrap", "mirror",
+                      "sblur", 0.01, "firstchannel", 1, "missingcolor", color(0.5));
+    color e = environment(filename, normalize(vector(u, v, 1)), "wrap", "periodic");
+    int hit = trace(P, vector(0, 0, 1), "mindist", 0.1, "maxdist", 100.0);
+    int indices[4];
+    float distances[4];
+    int n = pointcloud_search("cloud.geo", P, 0.5, 4, 1, "index", indices,
+                              "distance", distances);
+    Cout = c + e + color(0, hit, n);
+}
