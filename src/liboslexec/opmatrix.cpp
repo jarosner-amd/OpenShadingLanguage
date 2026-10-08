@@ -11,6 +11,7 @@
 /////////////////////////////////////////////////////////////////////////
 
 #include "oslexec_pvt.h"
+#include "shadeops_contract.h"
 #include <OSL/dual.h>
 #include <OSL/dual_vec.h>
 #include <OSL/fmt_util.h>
@@ -136,8 +137,11 @@ osl_transformn_dvmdv(void* result, void* M_, void* v_)
     multDirMatrix(inlinedTransposed(M.inverse()), v, DVEC(result));
 }
 
-#if !OSL_GPU
-OSL_SHADEOP int
+// Named spaces: on the CPU and on HIP, OSL resolves them itself and asks the
+// renderer only through the rs_* functions. On CUDA the renderer supplies
+// osl_get_matrix and osl_get_inverse_matrix.
+#if OSL_SHADEOPS_RS_ONLY
+OSL_SHADEOP OSL_HOSTDEVICE int
 osl_get_matrix(OpaqueExecContextPtr oec, void* r, ustringhash_pod from_)
 {
     ustringhash from = ustringhash_from(from_);
@@ -167,7 +171,7 @@ osl_get_matrix(OpaqueExecContextPtr oec, void* r, ustringhash_pod from_)
 
 
 
-OSL_SHADEOP int
+OSL_SHADEOP OSL_HOSTDEVICE int
 osl_get_inverse_matrix(OpaqueExecContextPtr oec, void* r, ustringhash_pod to_)
 {
     ustringhash to = ustringhash_from(to_);
@@ -202,7 +206,7 @@ osl_get_matrix(OpaqueExecContextPtr oec, void* r, ustringhash_pod from);
 OSL_SHADEOP_EXPORT OSL_HOSTDEVICE int
 osl_get_inverse_matrix(OpaqueExecContextPtr oec, void* r, ustringhash_pod to);
 #    undef OSL_SHADEOP_EXPORT
-#endif  // !OSL_GPU
+#endif  // OSL_SHADEOPS_RS_ONLY
 
 
 
@@ -214,7 +218,7 @@ osl_prepend_matrix_from(OpaqueExecContextPtr oec, void* r,
     bool ok = osl_get_matrix(oec, &m, from_);
     if (ok)
         MAT(r) = m * MAT(r);
-#if !OSL_GPU
+#if OSL_SHADEOPS_RS_ONLY
     // TODO: How do we manage this in OptiX?
     else {
         if (get_unknown_coordsys_error(oec)) {
@@ -305,7 +309,7 @@ osl_transform_triple_nonlinear(OpaqueExecContextPtr oec, void* Pin,
                                ustringhash_pod from_, ustringhash_pod to_,
                                int vectype)
 {
-#if !OSL_GPU
+#if OSL_SHADEOPS_RS_ONLY
     ustringhash from = ustringhash_from(from_);
     ustringhash to   = ustringhash_from(to_);
 
@@ -325,7 +329,7 @@ osl_transform_triple_nonlinear(OpaqueExecContextPtr oec, void* Pin,
         }
         return true;
     }
-#endif  // !OSL_GPU
+#endif  // OSL_SHADEOPS_RS_ONLY
 
     // Renderer couldn't or wouldn't transform directly
     // Except in OptiX we're the renderer will directly implement
