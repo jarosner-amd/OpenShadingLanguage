@@ -11,6 +11,7 @@
 /////////////////////////////////////////////////////////////////////////
 
 #include "oslexec_pvt.h"
+#include "shadeops_contract.h"
 #include <OSL/Imathx/Imathx.h>
 #include <OSL/dual.h>
 #include <OSL/dual_vec.h>
@@ -400,8 +401,10 @@ ColorSystem::transformc(ustringhash fromspace, ustringhash tospace,
 }  // namespace pvt
 
 
-// On GPU, this will be defined by the renderer. Otherwise inline a getter.
-#if OSL_GPU
+// On CUDA, this will be defined by the renderer. On the CPU and on HIP,
+// read the color system from the uniform shading state, which the
+// renderer makes reachable through ShaderGlobals::shadingStateUniform.
+#if !OSL_SHADEOPS_RS_ONLY
 extern "C" __device__ int
 rend_get_userdata(ustringhash name, void* data, int data_size,
                   const OSL::TypeDesc& type, int index);
@@ -422,7 +425,7 @@ get_colorsystem(OSL::OpaqueExecContextPtr /*oec*/)
 
 namespace {
 
-inline const ColorSystem&
+OSL_HOSTDEVICE inline const ColorSystem&
 get_colorsystem(OSL::OpaqueExecContextPtr oec)
 {
     auto ec                  = pvt::get_ec(oec);

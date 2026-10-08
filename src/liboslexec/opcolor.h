@@ -142,7 +142,7 @@ private:
 
 
 class OCIOColorSystem {
-#ifndef __CUDACC__
+#if !OSL_GPU
 public:
     OIIO::ColorProcessorHandle load_transform(ustring fromspace,
                                               ustring tospace,
