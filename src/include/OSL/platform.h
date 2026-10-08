@@ -586,7 +586,12 @@ OSL_FORCEINLINE OSL_HOSTDEVICE To bitcast(const From& src) noexcept {
     static_assert(sizeof(From) == sizeof(To),
                   "bit_cast must be between objects of the same size");
     To dst;
+#if defined(__HIP_DEVICE_COMPILE__)
+    // With glibc, memcpy has no device version in a HIP device compile.
+    __builtin_memcpy((void*)&dst, &src, sizeof(From));
+#else
     memcpy((void*)&dst, &src, sizeof(From));
+#endif
     return dst;
 }
 
