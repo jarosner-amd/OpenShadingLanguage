@@ -35,9 +35,13 @@ command += testshade("-g 1 1 --groupname g5 --layer A entry_a --layer B entry_b"
                      + " --layer C entry_c --entry A --entry B --amdgpu"
                      + " --amdgpu-arch gfx1100 --amdgpu-format llvmir"
                      + " --save-amdgpu -o Cout null")
+# Shadeops that reach the renderer only through rs_* functions: the
+# artifact declares rs_* functions and no osl_* ones.
+command += amdgpu("g6", "services", "--amdgpu-arch gfx1201 --amdgpu-format llvmir")
 for f in [ "amdgpu_g1_gfx1100.ll", "amdgpu_g1_gfx1201.ll",
            "amdgpu_g2_gfx1100.ll", "amdgpu_g2_gfx1201.ll",
-           "amdgpu_g3_gfx1201.bc", "amdgpu_g5_gfx1100.ll" ] :
+           "amdgpu_g3_gfx1201.bc", "amdgpu_g5_gfx1100.ll",
+           "amdgpu_g6_gfx1201.ll" ] :
     command += check(f)
 
 outputs = [ "out.txt" ]

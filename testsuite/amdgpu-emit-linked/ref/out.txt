@@ -2,6 +2,7 @@ Compiled entry_a.osl -> entry_a.oso
 Compiled entry_b.osl -> entry_b.oso
 Compiled entry_c.osl -> entry_c.oso
 Compiled ops.osl -> ops.oso
+Compiled services.osl -> services.oso
 Compiled test.osl -> test.oso
 
 AMDGPU artifact 0: arch=gfx1100 triple=amdgcn-amd-amdhsa format=llvmir exports=3
@@ -39,6 +40,12 @@ AMDGPU artifact 0: arch=gfx1100 triple=amdgcn-amd-amdhsa format=llvmir exports=4
   export 2: kind=init layer=- symbol=__direct_callable__osl_init_group_g5
   export 3: kind=fused layer=- symbol=__direct_callable__fused_g5_name_C
 Wrote amdgpu_g5_gfx1100.ll
+
+AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=L symbol=__direct_callable__osl_layer_group_g6_name_L
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_g6
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_g6_name_L
+Wrote amdgpu_g6_gfx1201.ll
 check amdgpu_g1_gfx1100.ll:
   triple: amdgcn-amd-amdhsa
   exports: 3
@@ -52,6 +59,7 @@ check amdgpu_g1_gfx1100.ll:
   declares osl noise: no
   osl functions declared: none
   osl functions called: none
+  renderer services declared: none
 llc gfx1100 amdgpu_g1_gfx1100.ll: ok
 check amdgpu_g1_gfx1201.ll:
   triple: amdgcn-amd-amdhsa
@@ -66,6 +74,7 @@ check amdgpu_g1_gfx1201.ll:
   declares osl noise: no
   osl functions declared: none
   osl functions called: none
+  renderer services declared: none
 llc gfx1201 amdgpu_g1_gfx1201.ll: ok
 check amdgpu_g2_gfx1100.ll:
   triple: amdgcn-amd-amdhsa
@@ -80,6 +89,7 @@ check amdgpu_g2_gfx1100.ll:
   declares osl noise: no
   osl functions declared: none
   osl functions called: none
+  renderer services declared: none
 llc gfx1100 amdgpu_g2_gfx1100.ll: ok
 check amdgpu_g2_gfx1201.ll:
   triple: amdgcn-amd-amdhsa
@@ -94,6 +104,7 @@ check amdgpu_g2_gfx1201.ll:
   declares osl noise: no
   osl functions declared: none
   osl functions called: none
+  renderer services declared: none
 llc gfx1201 amdgpu_g2_gfx1201.ll: ok
 check amdgpu_g3_gfx1201.bc:
   bitcode magic: ok
@@ -112,4 +123,20 @@ check amdgpu_g5_gfx1100.ll:
   declares osl noise: no
   osl functions declared: none
   osl functions called: none
+  renderer services declared: none
 llc gfx1100 amdgpu_g5_gfx1100.ll: ok
+check amdgpu_g6_gfx1201.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 3
+    __direct_callable__fused_g6_name_L
+    __direct_callable__osl_init_group_g6
+    __direct_callable__osl_layer_group_g6_name_L
+  target-cpu: gfx1201
+  every define has target-cpu: yes
+  code object version: 600
+  host pointers: none
+  declares osl noise: no
+  osl functions declared: none
+  osl functions called: none
+  renderer services declared: rs_errorfmt rs_get_inverse_matrix_space_time rs_get_inverse_matrix_xform_time rs_get_matrix_space_time rs_printfmt
+llc gfx1201 amdgpu_g6_gfx1201.ll: ok
