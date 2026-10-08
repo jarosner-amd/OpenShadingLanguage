@@ -1,0 +1,20 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// Shadeops that reach the renderer only through rs_* functions: named and
+// built-in spaces, color, printf, and a range-checked array index. With the
+// AMDGPU device shadeops linked in, the artifact should declare only rs_*
+// functions.
+shader services (output color Cout = 0)
+{
+    float a[3] = { 0.25, 0.5, 0.75 };
+    int i = int(u * 3.99);  // 3 at the right edge: out of range
+    point p = transform("myspace", "shader", P);
+    point q = transform("camera", P);
+    color c = blackbody(1000 + 5000 * v);
+    color h = transformc("hsv", c);
+    if (u > 0.99 && v > 0.99)
+        printf("corner %g\n", luminance(c));
+    Cout = color(a[i] + q[2], p[1], luminance(h));
+}
