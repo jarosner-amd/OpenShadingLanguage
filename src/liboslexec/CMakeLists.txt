@@ -254,12 +254,12 @@ if (USE_LLVM_BITCODE)
         # The AMDGPU device shadeops are compiled once per GPU architecture
         # and embedded in liboslexec. When a shader group is compiled for
         # AMDGPU, the bitcode for each requested architecture is linked into
-        # that architecture's artifact. Only these sources so far: opcolor,
-        # opmatrix, pointcloud, opclosure and optexture each have some
-        # functions that call renderer services, so they are left out as a
-        # whole for now.
+        # that architecture's artifact. They reach the renderer only through
+        # the rs_* functions, which the renderer links in itself. Not yet
+        # included: opcolor, opfmt, pointcloud, opclosure and optexture.
         set (amdgpu_shadeops_srcs
             ${CMAKE_SOURCE_DIR}/src/liboslexec/llvm_ops.cpp
+            ${CMAKE_SOURCE_DIR}/src/liboslexec/opmatrix.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opnoise.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opspline.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslnoise/gabornoise.cpp
