@@ -23,7 +23,9 @@ namespace pvt {
 // to the fmt reporting system
 OSL_PACK_STRUCTS_BEGIN
 template<int IndexT, typename TypeT> struct alignas(1) PackedArg {
-    explicit PackedArg(const TypeT& a_value) : m_value(a_value) {}
+    OSL_HOSTDEVICE explicit PackedArg(const TypeT& a_value) : m_value(a_value)
+    {
+    }
     TypeT m_value;
 };
 OSL_PACK_STRUCTS_END
@@ -36,7 +38,7 @@ template<int... IntegerListT, typename... TypeListT>
 struct alignas(1)
     PackedArgsBase<std::integer_sequence<int, IntegerListT...>, TypeListT...>
     : public PackedArg<IntegerListT, TypeListT>... {
-    explicit PackedArgsBase(const TypeListT&... a_values)
+    OSL_HOSTDEVICE explicit PackedArgsBase(const TypeListT&... a_values)
         // multiple inheritance of individual components
         // uniquely identified by the <Integer,Type> combo
         : PackedArg<IntegerListT, TypeListT>(a_values)...
@@ -50,7 +52,7 @@ template<typename... TypeListT> struct PackedArgs {
         IndexSequenceType;
     PackedArgsBase<IndexSequenceType, TypeListT...> m_components;
 
-    explicit PackedArgs(const TypeListT&... a_values)
+    OSL_HOSTDEVICE explicit PackedArgs(const TypeListT&... a_values)
         : m_components(a_values...)
     {
     }
@@ -62,12 +64,34 @@ static_assert(sizeof(PackedArgs<int, char, int>)
 static_assert(alignof(PackedArgs<int, char, int>) == 1,
               "PackedArgs<> type is not aligned to 1");
 
+// The hash of a format specification or file name. A character array is
+// measured without strlen, which a GPU device does not have: up to its
+// first zero, so that a string literal and a buffer holding a shorter
+// string both hash like the same text as a ustring. For a literal the loop
+// folds away at compile time.
+template<typename T>
+OSL_HOSTDEVICE inline OSL::ustringhash
+fmt_spec_hash(const T& spec)
+{
+    return OSL::ustringhash { spec };
+}
+
+template<size_t N>
+OSL_HOSTDEVICE inline OSL::ustringhash
+fmt_spec_hash(const char (&spec)[N])
+{
+    size_t len = 0;
+    while (len < N && spec[len] != '\0')
+        ++len;
+    return OSL::ustringhash(spec, len);
+}
+
 }  // namespace pvt
 
 
 
 template<typename FilenameT, typename SpecifierT, typename... ArgListT>
-void
+OSL_HOSTDEVICE void
 filefmt(OpaqueExecContextPtr oec, const FilenameT& filename_hash,
         const SpecifierT& fmt_specification, ArgListT... args)
 {
@@ -78,15 +102,15 @@ filefmt(OpaqueExecContextPtr oec, const FilenameT& filename_hash,
         pvt::TypeEncoder<ArgListT>::Encode(args)...
     };
 
-    rs_filefmt(oec, OSL::ustringhash { filename_hash },
-               OSL::ustringhash { fmt_specification }, count,
+    rs_filefmt(oec, pvt::fmt_spec_hash(filename_hash),
+               pvt::fmt_spec_hash(fmt_specification), count,
                (count == 0) ? nullptr : argTypes,
                static_cast<uint32_t>((count == 0) ? 0 : sizeof(argValues)),
                (count == 0) ? nullptr : reinterpret_cast<uint8_t*>(&argValues));
 }
 
 template<typename SpecifierT, typename... ArgListT>
-void
+OSL_HOSTDEVICE void
 printfmt(OpaqueExecContextPtr oec, const SpecifierT& fmt_specification,
          ArgListT... args)
 {
@@ -97,7 +121,7 @@ printfmt(OpaqueExecContextPtr oec, const SpecifierT& fmt_specification,
         pvt::TypeEncoder<ArgListT>::Encode(args)...
     };
 
-    rs_printfmt(oec, OSL::ustringhash { fmt_specification }, count,
+    rs_printfmt(oec, pvt::fmt_spec_hash(fmt_specification), count,
                 (count == 0) ? nullptr : argTypes,
                 static_cast<uint32_t>((count == 0) ? 0 : sizeof(argValues)),
                 (count == 0) ? nullptr
@@ -105,7 +129,7 @@ printfmt(OpaqueExecContextPtr oec, const SpecifierT& fmt_specification,
 }
 
 template<typename SpecifierT, typename... ArgListT>
-void
+OSL_HOSTDEVICE void
 errorfmt(OpaqueExecContextPtr oec, const SpecifierT& fmt_specification,
          ArgListT... args)
 {
@@ -116,7 +140,7 @@ errorfmt(OpaqueExecContextPtr oec, const SpecifierT& fmt_specification,
         pvt::TypeEncoder<ArgListT>::Encode(args)...
     };
 
-    rs_errorfmt(oec, OSL::ustringhash { fmt_specification }, count,
+    rs_errorfmt(oec, pvt::fmt_spec_hash(fmt_specification), count,
                 (count == 0) ? nullptr : argTypes,
                 static_cast<uint32_t>((count == 0) ? 0 : sizeof(argValues)),
                 (count == 0) ? nullptr
@@ -124,7 +148,7 @@ errorfmt(OpaqueExecContextPtr oec, const SpecifierT& fmt_specification,
 }
 
 template<typename SpecifierT, typename... ArgListT>
-void
+OSL_HOSTDEVICE void
 warningfmt(OpaqueExecContextPtr oec, const SpecifierT& fmt_specification,
            ArgListT... args)
 {
@@ -135,7 +159,7 @@ warningfmt(OpaqueExecContextPtr oec, const SpecifierT& fmt_specification,
         pvt::TypeEncoder<ArgListT>::Encode(args)...
     };
 
-    rs_warningfmt(oec, OSL::ustringhash { fmt_specification }, count,
+    rs_warningfmt(oec, pvt::fmt_spec_hash(fmt_specification), count,
                   (count == 0) ? nullptr : argTypes,
                   static_cast<uint32_t>((count == 0) ? 0 : sizeof(argValues)),
                   (count == 0) ? nullptr
