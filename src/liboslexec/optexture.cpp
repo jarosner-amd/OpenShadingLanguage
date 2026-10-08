@@ -17,6 +17,7 @@
 #include <iostream>
 
 #include "oslexec_pvt.h"
+#include "shadeops_contract.h"
 #include <OSL/dual.h>
 #include <OSL/rs_free_function.h>
 
@@ -66,7 +67,15 @@ osl_init_texture_options(OpaqueExecContextPtr oec, void* opt)
 }
 
 
-#define OSL_TEXTURE_SET_HOSTDEVICE /* just host */
+// The option setters only fill an options struct. On HIP they are built into
+// the AMDGPU device shadeops, which are linked into each artifact with
+// internal linkage, so they cannot clash with a renderer's own functions.
+// CUDA renderers supply their own copies, so there they stay host-only.
+#if OSL_SHADEOPS_RS_ONLY
+#    define OSL_TEXTURE_SET_HOSTDEVICE OSL_HOSTDEVICE
+#else
+#    define OSL_TEXTURE_SET_HOSTDEVICE /* just host */
+#endif
 
 
 OSL_SHADEOP OSL_TEXTURE_SET_HOSTDEVICE void
@@ -87,6 +96,26 @@ decode_wrapmode(ustringhash_pod name_)
     ustring name = ustring_from(name_hash);
     return OIIO::TextureOpt::decode_wrapmode(name);
 #    endif
+#elif OSL_SHADEOPS_RS_ONLY
+    // OIIO's decoder is a host function. Compare the hash with the names it
+    // accepts; anything else gives the default, as for an unknown name.
+    constexpr ustringhash periodic_pow2(OSL::strhash("periodic_pow2"));
+    constexpr ustringhash periodic_sharedborder(
+        OSL::strhash("periodic_sharedborder"));
+    ustringhash name_hash = ustringhash_from(name_);
+    if (name_hash == Hashes::black)
+        return TextureOpt::WrapBlack;
+    if (name_hash == Hashes::clamp)
+        return TextureOpt::WrapClamp;
+    if (name_hash == Hashes::periodic)
+        return TextureOpt::WrapPeriodic;
+    if (name_hash == Hashes::mirror)
+        return TextureOpt::WrapMirror;
+    if (name_hash == periodic_pow2)
+        return TextureOpt::WrapPeriodicPow2;
+    if (name_hash == periodic_sharedborder)
+        return TextureOpt::WrapPeriodicSharedBorder;
+    return TextureOpt::WrapDefault;
 #else
     return TextureOpt::WrapDefault;
 #endif
@@ -645,3 +674,15 @@ osl_trace_get(OpaqueExecContextPtr oec, ustringhash_pod name_, long long type_,
 
 }  // namespace pvt
 OSL_NAMESPACE_END
+
+
+
+#if OSL_GPU_DEVICE_COMPILE && OSL_SHADEOPS_RS_ONLY
+// The size and alignment of the option structs as this device compile sees
+// them: TextureOpt, then TraceOpt. The generated code reserves these structs
+// itself and the setters above write into them, so when OSL links these
+// shadeops into an artifact it checks that what it reserves is large enough.
+extern "C" __device__ const unsigned long long osl_amdgpu_option_layout[4]
+    = { sizeof(OSL::TextureOpt), alignof(OSL::TextureOpt),
+        sizeof(OSL::TraceOpt), alignof(OSL::TraceOpt) };
+#endif
