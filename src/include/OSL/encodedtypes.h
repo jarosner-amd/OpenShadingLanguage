@@ -60,7 +60,10 @@ template<> struct TypeEncoder<OSL::ustringhash> {
     static constexpr EncodedType value = EncodedType::kUstringHash;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const OSL::ustringhash& val) { return val.hash(); }
+    OSL_HOSTDEVICE static DataType Encode(const OSL::ustringhash& val)
+    {
+        return val.hash();
+    }
 };
 
 template<> struct TypeEncoder<OSL::ustring> {
@@ -95,7 +98,7 @@ template<> struct TypeEncoder<int32_t> {
     static constexpr EncodedType value = EncodedType::kInt32;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const int32_t val) { return val; }
+    OSL_HOSTDEVICE static DataType Encode(const int32_t val) { return val; }
 };
 
 template<> struct TypeEncoder<float> {
@@ -103,7 +106,7 @@ template<> struct TypeEncoder<float> {
     static constexpr EncodedType value = EncodedType::kFloat;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const float val) { return val; }
+    OSL_HOSTDEVICE static DataType Encode(const float val) { return val; }
 };
 
 
@@ -112,7 +115,7 @@ template<> struct TypeEncoder<int64_t> {
     static constexpr EncodedType value = EncodedType::kInt64;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const int64_t val) { return val; }
+    OSL_HOSTDEVICE static DataType Encode(const int64_t val) { return val; }
 };
 
 // On macOS 10.+ ptrdiff_t is a long, but on linux this
@@ -123,7 +126,7 @@ template<> struct TypeEncoder<ptrdiff_t> {
     static constexpr EncodedType value = EncodedType::kInt64;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const ptrdiff_t val) { return val; }
+    OSL_HOSTDEVICE static DataType Encode(const ptrdiff_t val) { return val; }
 };
 #endif
 
@@ -132,7 +135,7 @@ template<> struct TypeEncoder<double> {
     static constexpr EncodedType value = EncodedType::kDouble;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const double val) { return val; }
+    OSL_HOSTDEVICE static DataType Encode(const double val) { return val; }
 };
 
 template<> struct TypeEncoder<uint64_t> {
@@ -140,7 +143,7 @@ template<> struct TypeEncoder<uint64_t> {
     static constexpr EncodedType value = EncodedType::kUInt64;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const uint64_t val) { return val; }
+    OSL_HOSTDEVICE static DataType Encode(const uint64_t val) { return val; }
 };
 
 template<> struct TypeEncoder<uint32_t> {
@@ -148,7 +151,7 @@ template<> struct TypeEncoder<uint32_t> {
     static constexpr EncodedType value = EncodedType::kUInt32;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const uint32_t val) { return val; }
+    OSL_HOSTDEVICE static DataType Encode(const uint32_t val) { return val; }
 };
 
 template<typename T> struct TypeEncoder<T*> {
@@ -162,7 +165,7 @@ template<typename T> struct TypeEncoder<T*> {
     static constexpr EncodedType value = EncodedType::kPointer;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const T* val) { return val; }
+    OSL_HOSTDEVICE static DataType Encode(const T* val) { return val; }
 };
 
 template<> struct TypeEncoder<OSL::TypeDesc> {
@@ -173,7 +176,7 @@ template<> struct TypeEncoder<OSL::TypeDesc> {
     static constexpr EncodedType value = EncodedType::kTypeDesc;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const OSL::TypeDesc& val)
+    OSL_HOSTDEVICE static DataType Encode(const OSL::TypeDesc& val)
     {
         return OSL::bitcast<DataType>(val);
     }
@@ -185,7 +188,10 @@ template<> struct TypeEncoder<int16_t> {
     static constexpr EncodedType value = EncodedType::kInt32;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const int16_t val) { return DataType(val); }
+    OSL_HOSTDEVICE static DataType Encode(const int16_t val)
+    {
+        return DataType(val);
+    }
 };
 
 template<> struct TypeEncoder<int8_t> {
@@ -193,7 +199,10 @@ template<> struct TypeEncoder<int8_t> {
     static constexpr EncodedType value = EncodedType::kInt32;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const int8_t val) { return DataType(val); }
+    OSL_HOSTDEVICE static DataType Encode(const int8_t val)
+    {
+        return DataType(val);
+    }
 };
 
 template<> struct TypeEncoder<uint16_t> {
@@ -201,7 +210,10 @@ template<> struct TypeEncoder<uint16_t> {
     static constexpr EncodedType value = EncodedType::kUInt32;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const uint16_t val) { return DataType(val); }
+    OSL_HOSTDEVICE static DataType Encode(const uint16_t val)
+    {
+        return DataType(val);
+    }
 };
 
 template<> struct TypeEncoder<uint8_t> {
@@ -209,7 +221,10 @@ template<> struct TypeEncoder<uint8_t> {
     static constexpr EncodedType value = EncodedType::kUInt32;
     static_assert(size_of_encoded_type(value) == sizeof(DataType),
                   "unexpected");
-    static DataType Encode(const uint8_t val) { return DataType(val); }
+    OSL_HOSTDEVICE static DataType Encode(const uint8_t val)
+    {
+        return DataType(val);
+    }
 };
 }  // namespace pvt
 
