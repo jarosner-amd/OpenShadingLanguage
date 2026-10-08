@@ -280,6 +280,14 @@ public:
     ///                              setting the same value again is fine.
     ///                              The result of compiling is read from the
     ///                              group, see "gpu_num_artifacts" below.
+    ///                           For "amdgpu", what the renderer's
+    ///                              get_texture_handle() returns for a
+    ///                              constant file name is embedded in the
+    ///                              artifact as a constant, unless
+    ///                              opt_texture_handle is 0. It must be valid
+    ///                              on the device, or null. The default
+    ///                              implementation returns a pointer into the
+    ///                              host process, which is not.
     ///                           For "amdgpu", the built-in shadeops reach the
     ///                              renderer only through the rs_* functions,
     ///                              which the renderer links with the artifact

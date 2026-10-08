@@ -358,6 +358,10 @@ set_shadingsys_options()
         }
         if (amdgpu_format.size())
             shadingsys->attribute("gpu_artifact_kind", amdgpu_format);
+        // SimpleRenderer's texture handles are pointers into this process.
+        // They mean nothing on a GPU, and they would make the artifact
+        // differ from run to run.
+        shadingsys->attribute("opt_texture_handle", 0);
     }
 
     // Allow user provided extraoptions to override the values set above
