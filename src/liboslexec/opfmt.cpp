@@ -31,6 +31,9 @@ namespace pvt {
 // Shims to convert llvm gen to rs free function C++ parameter types
 // and forward on calls to re free functions.
 
+// These two need the host's string table, so they are not built for a
+// device.
+#if !OSL_GPU_DEVICE_COMPILE
 OSL_RSOP OSL::ustringhash_pod
 osl_gen_ustringhash_pod(ustring_pod s)
 {
@@ -42,8 +45,9 @@ osl_gen_ustring(OSL::ustringhash_pod hash)
 {
     return ustring_from(hash).c_str();
 }
+#endif
 
-OSL_RSOP void
+OSL_RSOP OSL_HOSTDEVICE void
 osl_gen_errorfmt(OpaqueExecContextPtr exec_ctx,
                  OSL::ustringhash_pod fmt_specification, int32_t arg_count,
                  void* arg_types, uint32_t arg_values_size, uint8_t* arg_values)
@@ -58,7 +62,7 @@ osl_gen_errorfmt(OpaqueExecContextPtr exec_ctx,
 
 
 
-OSL_RSOP void
+OSL_RSOP OSL_HOSTDEVICE void
 osl_gen_warningfmt(OpaqueExecContextPtr exec_ctx,
                    OSL::ustringhash_pod fmt_specification, int32_t arg_count,
                    void* arg_types, uint32_t arg_values_size,
@@ -73,7 +77,7 @@ osl_gen_warningfmt(OpaqueExecContextPtr exec_ctx,
 }
 
 
-OSL_RSOP void
+OSL_RSOP OSL_HOSTDEVICE void
 osl_gen_printfmt(OpaqueExecContextPtr exec_ctx,
                  OSL::ustringhash_pod fmt_specification, int32_t arg_count,
                  void* arg_types, uint32_t arg_values_size, uint8_t* arg_values)
@@ -87,7 +91,7 @@ osl_gen_printfmt(OpaqueExecContextPtr exec_ctx,
 }
 
 
-OSL_RSOP void
+OSL_RSOP OSL_HOSTDEVICE void
 osl_gen_filefmt(OpaqueExecContextPtr exec_ctx,
                 OSL::ustringhash_pod filename_hash,
                 OSL::ustringhash_pod fmt_specification, int32_t arg_count,
@@ -102,6 +106,7 @@ osl_gen_filefmt(OpaqueExecContextPtr exec_ctx,
                encoded_types, arg_values_size, arg_values);
 }
 
+#if !OSL_GPU_DEVICE_COMPILE
 int
 get_max_warnings_per_thread(OpaqueExecContextPtr oec)
 {
@@ -110,6 +115,7 @@ get_max_warnings_per_thread(OpaqueExecContextPtr oec)
         ec->shadingStateUniform);
     return ssu->m_max_warnings_per_thread;
 }
+#endif
 
 }  //namespace pvt
 

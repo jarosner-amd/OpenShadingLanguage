@@ -256,9 +256,11 @@ if (USE_LLVM_BITCODE)
         # AMDGPU, the bitcode for each requested architecture is linked into
         # that architecture's artifact. They reach the renderer only through
         # the rs_* functions, which the renderer links in itself. Not yet
-        # included: opcolor, opfmt, pointcloud, opclosure and optexture.
+        # included: pointcloud, opclosure and optexture.
         set (amdgpu_shadeops_srcs
             ${CMAKE_SOURCE_DIR}/src/liboslexec/llvm_ops.cpp
+            ${CMAKE_SOURCE_DIR}/src/liboslexec/opcolor.cpp
+            ${CMAKE_SOURCE_DIR}/src/liboslexec/opfmt.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opmatrix.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opnoise.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opspline.cpp
