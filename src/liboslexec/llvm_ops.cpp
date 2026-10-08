@@ -81,6 +81,11 @@ typedef long double max_align_t;
 #include <OSL/dual_vec.h>
 #include <OSL/oslconfig.h>
 #include <OSL/shaderglobals.h>
+
+#include "shadeops_contract.h"
+#if OSL_GPU_DEVICE_COMPILE && OSL_SHADEOPS_RS_ONLY
+#    include <OSL/fmt_util.h>
+#endif
 using namespace OSL;
 
 #include <OpenImageIO/fmath.h>
@@ -975,12 +980,45 @@ osl_raytype_bit(OpaqueExecContextPtr ec, int bit)
 }
 
 
+#if OSL_GPU_DEVICE_COMPILE && OSL_SHADEOPS_RS_ONLY
+// On HIP devices OSL reports the error itself, through rs_errorfmt, the same
+// way as the CPU version in shadingsys.cpp. On CUDA the renderer supplies
+// this function.
+OSL_SHADEOP_NOINLINE int
+osl_range_check_err(int indexvalue, int length, ustringhash_pod symname_,
+                    OpaqueExecContextPtr ec, ustringhash_pod sourcefile_,
+                    int sourceline, ustringhash_pod groupname_, int layer,
+                    ustringhash_pod layername_, ustringhash_pod shadername_)
+{
+    if (indexvalue < 0 || indexvalue >= length) {
+        auto groupname = OSL::ustringhash_from(groupname_);
+        auto layername = OSL::ustringhash_from(layername_);
+        OSL::errorfmt(
+            ec,
+            "Index [{}] out of range {}[0..{}]: {}:{} (group {}, layer {} {}, shader {})",
+            indexvalue, OSL::ustringhash_from(symname_), length - 1,
+            OSL::ustringhash_from(sourcefile_), sourceline,
+            groupname.empty() ? OSL::pvt::fmt_spec_hash("<unnamed group>")
+                              : groupname,
+            layer,
+            layername.empty() ? OSL::pvt::fmt_spec_hash("<unnamed layer>")
+                              : layername,
+            OSL::ustringhash_from(shadername_));
+        if (indexvalue >= length)
+            indexvalue = length - 1;
+        else
+            indexvalue = 0;
+    }
+    return indexvalue;
+}
+#else
 // extern declaration
 OSL_SHADEOP_NOINLINE int
 osl_range_check_err(int indexvalue, int length, ustringhash_pod symname,
                     OpaqueExecContextPtr ec, ustringhash_pod sourcefile,
                     int sourceline, ustringhash_pod groupname, int layer,
                     ustringhash_pod layername, ustringhash_pod shadername);
+#endif
 
 
 
