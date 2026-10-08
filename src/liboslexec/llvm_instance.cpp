@@ -2596,6 +2596,30 @@ BackendLLVM::link_amdgpu_shadeops(string_view arch)
             && def->getFunctionType() != fn.getFunctionType())
             mismatch = "function prototypes";
     }
+    if (!mismatch) {
+        // The generated code reserves the texture and trace option structs
+        // itself, and the device setters write into them: what it reserves
+        // must be at least as large and as aligned as the device compile's
+        // structs (recorded in optexture.cpp).
+        const llvm::GlobalVariable* gv = shadeops->getNamedGlobal(
+            "osl_amdgpu_option_layout");
+        const auto* layout = gv && gv->hasInitializer()
+                                 ? llvm::dyn_cast<llvm::ConstantDataArray>(
+                                       gv->getInitializer())
+                                 : nullptr;
+        const llvm::DataLayout& dl = module->getDataLayout();
+        auto fits                  = [&](llvm::Type* type, unsigned index) {
+            return dl.getTypeAllocSize(type)
+                       >= layout->getElementAsInteger(index)
+                   && dl.getABITypeAlign(type).value()
+                          >= layout->getElementAsInteger(index + 1);
+        };
+        if (!layout || layout->getNumElements() != 4)
+            mismatch = "option struct layout missing";
+        else if (!fits(llvm_type_texture_options(), 0)
+                 || !fits(llvm_type_trace_options(), 2))
+            mismatch = "texture or trace option struct layout";
+    }
     if (mismatch) {
         shadingcontext()->errorfmt(
             "Cannot compile shader group \"{}\" for AMDGPU architecture \"{}\": the device shadeops do not match the shader group ({})",
