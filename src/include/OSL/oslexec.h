@@ -280,6 +280,15 @@ public:
     ///                              setting the same value again is fine.
     ///                              The result of compiling is read from the
     ///                              group, see "gpu_num_artifacts" below.
+    ///                           For "amdgpu", the built-in shadeops reach the
+    ///                              renderer only through the rs_* functions,
+    ///                              which the renderer links with the artifact
+    ///                              itself. Every ShaderGlobals must also have
+    ///                              shadingStateUniform pointing to a copy of
+    ///                              the uniform shading state in device memory,
+    ///                              made from the block that getattribute()
+    ///                              returns for "shading_state_uniform" (see
+    ///                              the getattribute() docs).
     ///    int llvm_jit_aggressive  Use LLVM "aggressive" JIT mode. (0)
     ///    int vector_width       Vector width to allow for SIMD ops (4).
     ///    int llvm_debugging_symbols  When JITing, generate debug symbols
