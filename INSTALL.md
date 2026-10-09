@@ -202,13 +202,29 @@ To build the shadeops in, configure with:
   configure) is the ROCm installation with the HIP headers and device
   libraries.
 
-The shadeops in `opmatrix.cpp`, `opcolor.cpp`, `optexture.cpp`,
-`pointcloud.cpp` and `opclosure.cpp` are not built in yet. Some of their
-functions need the renderer, so these files are left out as a whole. That
-covers all matrix operations (including multiply, transpose and
-determinant), all color functions, texture and trace, point clouds and
-closures. Calls to them stay external declarations, for the renderer to
-supply.
+Built in: the math, noise and spline shadeops, matrices and named spaces,
+color functions, and the printf, error and warning shims. Not built in yet:
+texture, trace and point cloud lookups (`optexture.cpp`, `pointcloud.cpp`),
+closures (`opclosure.cpp`), the string operations that need a string table
+(`opstring.cpp`), messages (`opmessage.cpp`), and `getattribute` and
+interpolated parameters (`osl_get_attribute`, `osl_bind_interpolated_param`).
+A shader group that needs one of these does not compile for AMDGPU; the
+error names the missing operations. A renderer must not define OSL's own
+`osl_*` functions.
+
+What the renderer supplies. The built-in shadeops reach the renderer only
+through the `rs_*` functions of `OSL/rs_free_function.h` (named spaces,
+`rs_errorfmt` and its siblings). The
+renderer implements them and links them with each artifact itself; OSL does
+not link renderer code. The renderer must also give every shading point a
+`ShaderGlobals` whose `shadingStateUniform` points to a copy of OSL's uniform
+shading state in device memory (the color system, the name of "common" space,
+whether an unknown coordinate system is an error, and the warning limit), and
+whose `renderstate` and transform pointers are valid on the device. The
+renderer gets that state as a block of bytes with the ShadingSystem
+attributes `shading_state_uniform` and `shading_state_uniform:size`, and
+copies it as it is; its layout is private to OSL. This interface is
+experimental.
 
 Python binding backends
 -----------------------
