@@ -42,6 +42,28 @@ fmtformat_to_n_safe(OutIt& out, size_t n, string_view fmt, Args&&... args)
 
 
 
+namespace {
+
+// The text of a string hash, for formatting. A hash that matches no ustring
+// in this process (for example a literal from GPU device code that the host
+// never made into a ustring) gives "<unknown 0x...>" instead of a null
+// pointer. The empty string has hash 0.
+const char*
+hash_text(uint64_t hash, std::string& storage)
+{
+    const char* text = OSL::ustring::from_hash(hash).c_str();
+    if (text)
+        return text;
+    if (hash == 0)
+        return "";
+    storage = fmtformat("<unknown 0x{:016x}>", hash);
+    return storage.c_str();
+}
+
+}  // namespace
+
+
+
 int
 decode_message(uint64_t format_hash, int32_t arg_count,
                const EncodedType* arg_types, const uint8_t* arg_values,
@@ -52,9 +74,18 @@ decode_message(uint64_t format_hash, int32_t arg_count,
     char rr_buf[128];
     built_str.clear();
 
-    const char* format = OSL::ustring::from_hash(format_hash).c_str();
-    OSL_ASSERT(format != nullptr
-               && "The string should have been a valid ustring");
+    std::string format_storage;
+    const char* format = hash_text(format_hash, format_storage);
+    if (!format_storage.empty()) {
+        // The format itself is unknown: report that, and still account for
+        // every argument, because callers step through their buffers by the
+        // returned size.
+        built_str = format;
+        int size  = 0;
+        for (int32_t i = 0; i < arg_count; ++i)
+            size += pvt::size_of_encoded_type(arg_types[i]);
+        return size;
+    }
     const int len = static_cast<int>(strlen(format));
 
     int arg_index                  = 0;
@@ -110,7 +141,9 @@ decode_message(uint64_t format_hash, int32_t arg_count,
                         OSL::ustringhash arg_value;
                         memcpy(&arg_value, &arg_values[arg_offset],
                                sizeof(arg_value));
-                        const char* arg_string = arg_value.c_str();
+                        std::string arg_storage;
+                        const char* arg_string = hash_text(arg_value.hash(),
+                                                           arg_storage);
                         auto result = fmtformat_to_n_safe(replacement_str,
                                                           rs_max_length + 1,
                                                           replacement_region,
