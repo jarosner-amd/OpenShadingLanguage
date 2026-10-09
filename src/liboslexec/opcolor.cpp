@@ -12,6 +12,7 @@
 
 #include "oslexec_pvt.h"
 #include "shadeops_contract.h"
+#include "shadeops_strings.h"
 #include <OSL/Imathx/Imathx.h>
 #include <OSL/dual.h>
 #include <OSL/dual_vec.h>
@@ -245,6 +246,12 @@ ColorSystem::ocio_transform(ustringhash fromspace, ustringhash tospace,
         OSL::errorfmt(ec, "Unknown color space transformation \"{}\" -> \"{}\"",
                       fromspace, tospace);
     }
+#elif OSL_GPU_DEVICE_COMPILE && OSL_SHADEOPS_RS_ONLY
+    // There is no OCIO on the device, so a transformation that only OCIO
+    // knows cannot be done here either; say so instead of returning the
+    // color unchanged in silence.
+    OSL::errorfmt(ec, OSL::pvt::ShadeopsHashes::color_transform_unavailable,
+                  fromspace, tospace);
 #endif  // !OSL_GPU_DEVICE_COMPILE && !defined(OSL_COMPILING_TO_BITCODE)
 
     return C;

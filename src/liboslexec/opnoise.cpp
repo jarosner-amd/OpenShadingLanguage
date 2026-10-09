@@ -5,6 +5,8 @@
 #include <limits>
 
 #include "oslexec_pvt.h"
+#include "shadeops_contract.h"
+#include "shadeops_strings.h"
 #include <OSL/Imathx/Imathx.h>
 #include <OSL/dual_vec.h>
 #include <OSL/fmt_util.h>
@@ -746,10 +748,12 @@ struct GenericNoise {
             hashnoise(result.val(), s.val());
             result.clear_d();
         } else {
-#    if !OSL_GPU_DEVICE_COMPILE
-            OSL::errorfmt(sg, "Unknown noise type \"{}\"", name);
+#    if !OSL_GPU_DEVICE_COMPILE || OSL_SHADEOPS_RS_ONLY
+            OSL::errorfmt(sg, ShadeopsHashes::unknown_noise_type, name);
 #    else
-            // TODO: find a way to signal this error on the GPU
+            // TODO: find a way to signal this error on CUDA devices
+#    endif
+#    if OSL_GPU_DEVICE_COMPILE
             result.clear_d();
 #    endif
         }
@@ -794,10 +798,12 @@ struct GenericNoise {
             hashnoise(result.val(), s.val(), t.val());
             result.clear_d();
         } else {
-#    if !OSL_GPU_DEVICE_COMPILE
-            OSL::errorfmt(sg, "Unknown noise type \"{}\"", name);
+#    if !OSL_GPU_DEVICE_COMPILE || OSL_SHADEOPS_RS_ONLY
+            OSL::errorfmt(sg, ShadeopsHashes::unknown_noise_type, name);
 #    else
-            // TODO: find a way to signal this error on the GPU
+            // TODO: find a way to signal this error on CUDA devices
+#    endif
+#    if OSL_GPU_DEVICE_COMPILE
             result.clear_d();
 #    endif
         }
@@ -839,10 +845,12 @@ struct GenericPNoise {
             hashnoise(result.val(), s.val(), sp);
             result.clear_d();
         } else {
-#    if !OSL_GPU_DEVICE_COMPILE
-            OSL::errorfmt(sg, "Unknown noise type \"{}\"", name);
+#    if !OSL_GPU_DEVICE_COMPILE || OSL_SHADEOPS_RS_ONLY
+            OSL::errorfmt(sg, ShadeopsHashes::unknown_noise_type, name);
 #    else
-            // TODO: find a way to signal this error on the GPU
+            // TODO: find a way to signal this error on CUDA devices
+#    endif
+#    if OSL_GPU_DEVICE_COMPILE
             result.clear_d();
 #    endif
         }
@@ -873,10 +881,12 @@ struct GenericPNoise {
             hashnoise(result.val(), s.val(), t.val(), sp, tp);
             result.clear_d();
         } else {
-#    if !OSL_GPU_DEVICE_COMPILE
-            OSL::errorfmt(sg, "Unknown noise type \"{}\"", name);
+#    if !OSL_GPU_DEVICE_COMPILE || OSL_SHADEOPS_RS_ONLY
+            OSL::errorfmt(sg, ShadeopsHashes::unknown_noise_type, name);
 #    else
-            // TODO: find a way to signal this error on the GPU
+            // TODO: find a way to signal this error on CUDA devices
+#    endif
+#    if OSL_GPU_DEVICE_COMPILE
             result.clear_d();
 #    endif
         }
