@@ -203,10 +203,10 @@ To build the shadeops in, configure with:
   libraries.
 
 Built in: the math, noise and spline shadeops, matrices and named spaces,
-color functions, and the printf, error and warning shims. Not built in yet:
-texture, trace and point cloud lookups (`optexture.cpp`, `pointcloud.cpp`),
-closures (`opclosure.cpp`), the string operations that need a string table
-(`opstring.cpp`), messages (`opmessage.cpp`), and `getattribute` and
+color functions, the printf, error and warning shims, the texture, trace and
+point cloud shadeops, and the texture and trace option setters. Not built in
+yet: closures (`opclosure.cpp`), the string operations that need a string
+table (`opstring.cpp`), messages (`opmessage.cpp`), and `getattribute` and
 interpolated parameters (`osl_get_attribute`, `osl_bind_interpolated_param`).
 A shader group that needs one of these does not compile for AMDGPU; the
 error names the missing operations. A renderer must not define OSL's own
@@ -214,7 +214,7 @@ error names the missing operations. A renderer must not define OSL's own
 
 What the renderer supplies. The built-in shadeops reach the renderer only
 through the `rs_*` functions of `OSL/rs_free_function.h` (named spaces,
-`rs_errorfmt` and its siblings). The
+texture, point cloud and trace lookups, `rs_errorfmt` and its siblings). The
 renderer implements them and links them with each artifact itself; OSL does
 not link renderer code. The renderer must also give every shading point a
 `ShaderGlobals` whose `shadingStateUniform` points to a copy of OSL's uniform
@@ -224,7 +224,13 @@ whose `renderstate` and transform pointers are valid on the device. The
 renderer gets that state as a block of bytes with the ShadingSystem
 attributes `shading_state_uniform` and `shading_state_uniform:size`, and
 copies it as it is; its layout is private to OSL. This interface is
-experimental.
+experimental. The texture handle that the renderer's
+`get_texture_handle()` returns must be valid on the device, or null; see the
+`gpu_backend` attribute in `oslexec.h`. OSL fills the texture options that
+`rs_texture` and its siblings receive. Two of their fields hold something
+other than their declared type: `subimagename` holds the 64-bit hash of the
+name (a `ustringhash`), not a `ustring`, and `missingcolor` points to the
+shader's own copy of the color, valid only during the call.
 
 Python binding backends
 -----------------------
