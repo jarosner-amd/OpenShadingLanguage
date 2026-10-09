@@ -12,6 +12,7 @@
 
 #include "oslexec_pvt.h"
 #include "shadeops_contract.h"
+#include "shadeops_strings.h"
 #include <OSL/dual.h>
 #include <OSL/dual_vec.h>
 #include <OSL/fmt_util.h>
@@ -163,7 +164,8 @@ osl_get_matrix(OpaqueExecContextPtr oec, void* r, ustringhash_pod from_)
     if (!ok) {
         MAT(r).makeIdentity();
         if (get_unknown_coordsys_error(oec)) {
-            OSL::errorfmt(oec, "Unknown transformation \"{}\"", from);
+            OSL::errorfmt(oec, OSL::pvt::ShadeopsHashes::unknown_transformation,
+                          from);
         }
     }
     return ok;
@@ -193,7 +195,8 @@ osl_get_inverse_matrix(OpaqueExecContextPtr oec, void* r, ustringhash_pod to_)
     if (!ok) {
         MAT(r).makeIdentity();
         if (get_unknown_coordsys_error(oec)) {
-            OSL::errorfmt(oec, "Unknown transformation \"{}\"", to);
+            OSL::errorfmt(oec, OSL::pvt::ShadeopsHashes::unknown_transformation,
+                          to);
         }
     }
     return ok;
@@ -222,7 +225,7 @@ osl_prepend_matrix_from(OpaqueExecContextPtr oec, void* r,
     // TODO: How do we manage this in OptiX?
     else {
         if (get_unknown_coordsys_error(oec)) {
-            OSL::errorfmt(oec, "Unknown transformation \"{}\"",
+            OSL::errorfmt(oec, OSL::pvt::ShadeopsHashes::unknown_transformation,
                           ustringhash_from(from_));
         }
     }

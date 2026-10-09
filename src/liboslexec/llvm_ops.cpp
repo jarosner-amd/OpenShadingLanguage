@@ -84,6 +84,7 @@ typedef long double max_align_t;
 
 #include "shadeops_contract.h"
 #if OSL_GPU_DEVICE_COMPILE && OSL_SHADEOPS_RS_ONLY
+#    include "shadeops_strings.h"
 #    include <OSL/fmt_util.h>
 #endif
 using namespace OSL;
@@ -993,17 +994,17 @@ osl_range_check_err(int indexvalue, int length, ustringhash_pod symname_,
     if (indexvalue < 0 || indexvalue >= length) {
         auto groupname = OSL::ustringhash_from(groupname_);
         auto layername = OSL::ustringhash_from(layername_);
-        OSL::errorfmt(
-            ec,
-            "Index [{}] out of range {}[0..{}]: {}:{} (group {}, layer {} {}, shader {})",
-            indexvalue, OSL::ustringhash_from(symname_), length - 1,
-            OSL::ustringhash_from(sourcefile_), sourceline,
-            groupname.empty() ? OSL::pvt::fmt_spec_hash("<unnamed group>")
-                              : groupname,
-            layer,
-            layername.empty() ? OSL::pvt::fmt_spec_hash("<unnamed layer>")
-                              : layername,
-            OSL::ustringhash_from(shadername_));
+        OSL::errorfmt(ec, OSL::pvt::ShadeopsHashes::range_check_error,
+                      indexvalue, OSL::ustringhash_from(symname_), length - 1,
+                      OSL::ustringhash_from(sourcefile_), sourceline,
+                      groupname.empty()
+                          ? OSL::pvt::ShadeopsHashes::unnamed_group
+                          : groupname,
+                      layer,
+                      layername.empty()
+                          ? OSL::pvt::ShadeopsHashes::unnamed_layer
+                          : layername,
+                      OSL::ustringhash_from(shadername_));
         if (indexvalue >= length)
             indexvalue = length - 1;
         else
