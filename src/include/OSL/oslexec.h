@@ -301,7 +301,10 @@ public:
     ///                              the uniform shading state in device memory,
     ///                              made from the block that getattribute()
     ///                              returns for "shading_state_uniform" (see
-    ///                              the getattribute() docs).
+    ///                              the getattribute() docs). Closures
+    ///                              must be registered with no prepare or
+    ///                              setup function, which would be host
+    ///                              addresses in the artifact.
     ///    int llvm_jit_aggressive  Use LLVM "aggressive" JIT mode. (0)
     ///    int vector_width       Vector width to allow for SIMD ops (4).
     ///    int llvm_debugging_symbols  When JITing, generate debug symbols

@@ -204,17 +204,19 @@ To build the shadeops in, configure with:
 
 Built in: the math, noise and spline shadeops, matrices and named spaces,
 color functions, the printf, error and warning shims, the texture, trace and
-point cloud shadeops, and the texture and trace option setters. Not built in
-yet: closures (`opclosure.cpp`), the string operations that need a string
-table (`opstring.cpp`), messages (`opmessage.cpp`), and `getattribute` and
+point cloud shadeops, the texture and trace option setters, and closures.
+Not built in yet: the string operations that need a string table
+(`opstring.cpp`), messages (`opmessage.cpp`), and `getattribute` and
 interpolated parameters (`osl_get_attribute`, `osl_bind_interpolated_param`).
 A shader group that needs one of these does not compile for AMDGPU; the
 error names the missing operations. A renderer must not define OSL's own
 `osl_*` functions.
+Printing a closure (`printf("%s", Ci)`) is not supported on GPUs.
 
 What the renderer supplies. The built-in shadeops reach the renderer only
 through the `rs_*` functions of `OSL/rs_free_function.h` (named spaces,
-texture, point cloud and trace lookups, `rs_errorfmt` and its siblings). The
+texture, point cloud and trace lookups, closure memory through
+`rs_allocate_closure`, `rs_errorfmt` and its siblings). The
 renderer implements them and links them with each artifact itself; OSL does
 not link renderer code. The renderer must also give every shading point a
 `ShaderGlobals` whose `shadingStateUniform` points to a copy of OSL's uniform
@@ -231,6 +233,8 @@ experimental. The texture handle that the renderer's
 other than their declared type: `subimagename` holds the 64-bit hash of the
 name (a `ustringhash`), not a `ustring`, and `missingcolor` points to the
 shader's own copy of the color, valid only during the call.
+Closures must be registered before the group is compiled, with no `prepare`
+or `setup` function: those would be host addresses in the artifact.
 
 Python binding backends
 -----------------------
