@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "oslexec_pvt.h"
+#include "shadeops_strings.h"
 #include <OSL/fmt_util.h>
 #include <OSL/genclosure.h>
 #include "backendcpp.h"
@@ -1055,6 +1056,16 @@ namespace Strings {
 #include <OSL/strdecls.h>
 #undef STRDECL
 }  // namespace Strings
+
+// The strings the shadeops pass to the renderer as hashes, so that the host
+// can decode them even when only GPU device code used them.
+namespace pvt {
+namespace ShadeopsStrings {
+#define OSL_SHADEOPS_USTRING(str, var_name) const ustring var_name(str);
+OSL_SHADEOPS_STRINGS(OSL_SHADEOPS_USTRING)
+#undef OSL_SHADEOPS_USTRING
+}  // namespace ShadeopsStrings
+}  // namespace pvt
 
 
 
@@ -5238,15 +5249,15 @@ osl_range_check_err(int indexvalue, int length, ustringhash_pod symname_,
     if (indexvalue < 0 || indexvalue >= length) {
         auto groupname = OSL::ustringhash_from(groupname_);
         auto layername = OSL::ustringhash_from(layername_);
-        OSL::errorfmt(
-            ec,
-            "Index [{}] out of range {}[0..{}]: {}:{} (group {}, layer {} {}, shader {})",
-            indexvalue, OSL::ustringhash_from(symname_), length - 1,
-            OSL::ustringhash_from(sourcefile_), sourceline,
-            groupname.empty() ? OSL::ustringhash("<unnamed group>") : groupname,
-            layer,
-            layername.empty() ? OSL::ustringhash("<unnamed layer>") : layername,
-            OSL::ustringhash_from(shadername_));
+        OSL::errorfmt(ec, pvt::ShadeopsHashes::range_check_error, indexvalue,
+                      OSL::ustringhash_from(symname_), length - 1,
+                      OSL::ustringhash_from(sourcefile_), sourceline,
+                      groupname.empty() ? pvt::ShadeopsHashes::unnamed_group
+                                        : groupname,
+                      layer,
+                      layername.empty() ? pvt::ShadeopsHashes::unnamed_layer
+                                        : layername,
+                      OSL::ustringhash_from(shadername_));
         if (indexvalue >= length)
             indexvalue = length - 1;
         else
