@@ -18,7 +18,11 @@
       range_check_error)                                                  \
     X("<unnamed group>", unnamed_group)                                   \
     X("<unnamed layer>", unnamed_layer)                                   \
-    X("Unknown transformation \"{}\"", unknown_transformation)
+    X("Unknown transformation \"{}\"", unknown_transformation)            \
+    X("Color space transformation \"{}\" -> \"{}\" is not available on "  \
+      "this device",                                                      \
+      color_transform_unavailable)                                        \
+    X("Unknown noise type \"{}\"", unknown_noise_type)
 
 OSL_NAMESPACE_BEGIN
 namespace pvt {
