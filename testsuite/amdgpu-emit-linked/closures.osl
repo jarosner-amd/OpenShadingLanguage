@@ -1,0 +1,19 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// Closure construction: components with a keyword parameter, sums,
+// products with a varying color and a float, and a closure chosen by a
+// condition. The closure shadeops are built into the AMDGPU device
+// shadeops and get their memory through rs_allocate_closure, so the
+// artifact should declare only rs_* functions.
+shader closures (output color Cout = 0)
+{
+    closure color base = diffuse(N, "label", "base") + 0.25 * phong(N, 20);
+    closure color tinted = color(u, v, 0.5) * base;
+    if (u > 0.5)
+        Ci = tinted + 0.5 * reflection(N);
+    else
+        Ci = tinted;
+    Cout = color(u, v, 0);
+}

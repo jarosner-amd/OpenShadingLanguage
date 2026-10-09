@@ -1,3 +1,4 @@
+Compiled closures.osl -> closures.oso
 Compiled entry_a.osl -> entry_a.oso
 Compiled entry_b.osl -> entry_b.oso
 Compiled entry_c.osl -> entry_c.oso
@@ -53,6 +54,12 @@ AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
   export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_g7
   export 2: kind=fused layer=- symbol=__direct_callable__fused_g7_name_L
 Wrote amdgpu_g7_gfx1201.ll
+
+AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=L symbol=__direct_callable__osl_layer_group_g8_name_L
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_g8
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_g8_name_L
+Wrote amdgpu_g8_gfx1201.ll
 check amdgpu_g1_gfx1100.ll:
   triple: amdgcn-amd-amdhsa
   exports: 3
@@ -162,3 +169,18 @@ check amdgpu_g7_gfx1201.ll:
   osl functions called: none
   renderer services declared: rs_environment rs_pointcloud_search rs_texture rs_trace
 llc gfx1201 amdgpu_g7_gfx1201.ll: ok
+check amdgpu_g8_gfx1201.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 3
+    __direct_callable__fused_g8_name_L
+    __direct_callable__osl_init_group_g8
+    __direct_callable__osl_layer_group_g8_name_L
+  target-cpu: gfx1201
+  every define has target-cpu: yes
+  code object version: 600
+  host pointers: none
+  declares osl noise: no
+  osl functions declared: none
+  osl functions called: none
+  renderer services declared: rs_allocate_closure
+llc gfx1201 amdgpu_g8_gfx1201.ll: ok
