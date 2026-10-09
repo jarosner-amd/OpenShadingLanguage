@@ -255,10 +255,10 @@ if (USE_LLVM_BITCODE)
         # and embedded in liboslexec. When a shader group is compiled for
         # AMDGPU, the bitcode for each requested architecture is linked into
         # that architecture's artifact. They reach the renderer only through
-        # the rs_* functions, which the renderer links in itself. Not yet
-        # included: opclosure.
+        # the rs_* functions, which the renderer links in itself.
         set (amdgpu_shadeops_srcs
             ${CMAKE_SOURCE_DIR}/src/liboslexec/llvm_ops.cpp
+            ${CMAKE_SOURCE_DIR}/src/liboslexec/opclosure.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opcolor.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opfmt.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opmatrix.cpp
