@@ -712,6 +712,12 @@ if (OSL_BUILD_TESTS AND BUILD_TESTING)
     set_target_properties (llvmutil_test PROPERTIES FOLDER "Unit Tests")
     add_test (unit_llvmutil ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/llvmutil_test)
 
+    add_executable (message_decode_test message_decode_test.cpp)
+    target_link_libraries (message_decode_test PRIVATE oslexec ${CMAKE_DL_LIBS})
+    target_include_directories (message_decode_test  BEFORE PRIVATE ${OpenImageIO_INCLUDES})
+    set_target_properties (message_decode_test PROPERTIES FOLDER "Unit Tests")
+    add_test (unit_message_decode ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/message_decode_test)
+
     # Check the AMDGPU device shadeops of each architecture against the host
     # shadeops bitcode. Needs no GPU.
     if (OSL_ENABLE_AMDGPU)
