@@ -287,7 +287,12 @@ public:
     ///                              opt_texture_handle is 0. It must be valid
     ///                              on the device, or null. The default
     ///                              implementation returns a pointer into the
-    ///                              host process, which is not.
+    ///                              host process, which is not. Independent
+    ///                              of that, a gettextureinfo query with
+    ///                              constant arguments may be answered when
+    ///                              the shader is compiled, by the renderer's
+    ///                              host get_texture_info(); the answer is
+    ///                              then a constant in the artifact.
     ///                           For "amdgpu", the built-in shadeops reach the
     ///                              renderer only through the rs_* functions,
     ///                              which the renderer links with the artifact
