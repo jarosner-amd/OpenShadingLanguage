@@ -331,7 +331,13 @@ osl_texture(OpaqueExecContextPtr oec, ustringhash_pod name_, void* handle,
 #endif
     // It's actually faster to ask for 4 channels (even if we need fewer)
     // and ensure that they're being put in aligned memory.
+#if OSL_GPU_DEVICE_COMPILE
+    // A renderer's rs_texture may write nothing when the lookup fails, and
+    // Imath's Vec4 is not initialized by default: start from zero.
+    float4 result_simd(0.0f), dresultds_simd(0.0f), dresultdt_simd(0.0f);
+#else
     float4 result_simd, dresultds_simd, dresultdt_simd;
+#endif
     ustringhash em;
     ustringhash name = ustringhash_from(name_);
     bool ok = rs_texture(oec, name, (TextureSystem::TextureHandle*)handle,
@@ -410,7 +416,13 @@ osl_texture3d(OpaqueExecContextPtr oec, ustringhash_pod name_, void* handle,
 #endif
     // It's actually faster to ask for 4 channels (even if we need fewer)
     // and ensure that they're being put in aligned memory.
+#if OSL_GPU_DEVICE_COMPILE
+    // As in osl_texture: start from zero.
+    float4 result_simd(0.0f), dresultds_simd(0.0f), dresultdt_simd(0.0f),
+        dresultdr_simd(0.0f);
+#else
     float4 result_simd, dresultds_simd, dresultdt_simd, dresultdr_simd;
+#endif
     ustringhash em;
     ustringhash name = ustringhash_from(name_);
     bool ok = rs_texture3d(oec, name, (TextureSystem::TextureHandle*)handle,
@@ -486,7 +498,12 @@ osl_environment(OpaqueExecContextPtr oec, ustringhash_pod name_, void* handle,
 #endif
     // It's actually faster to ask for 4 channels (even if we need fewer)
     // and ensure that they're being put in aligned memory.
+#if OSL_GPU_DEVICE_COMPILE
+    // As in osl_texture: start from zero.
+    float4 local_result(0.0f);
+#else
     float4 local_result;
+#endif
     ustringhash em;
     ustringhash name = ustringhash_from(name_);
     bool ok = rs_environment(oec, name, (TextureSystem::TextureHandle*)handle,
