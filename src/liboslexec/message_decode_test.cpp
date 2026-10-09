@@ -3,17 +3,22 @@
 // https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
 
 // Messages from shadeops reach the host as string hashes, and are decoded
-// there with ustring::from_hash. Check that a hash the host does not know
-// is reported as such instead of crashing the decoder.
+// there with ustring::from_hash. Check that every string the shadeops pass
+// is known to the host once liboslexec is loaded, that a hash the host
+// does not know is reported as such instead of crashing the decoder, and
+// that a format given as a character array hashes like its text.
 
 #include <cstring>
 #include <string>
 #include <vector>
 
 #include <OSL/encodedtypes.h>
+#include <OSL/fmt_util.h>
 #include <OSL/hashes.h>
 #include <OSL/journal.h>
 #include <OpenImageIO/unittest.h>
+
+#include "shadeops_strings.h"
 
 using namespace OSL;
 
@@ -39,6 +44,26 @@ public:
 constexpr const char* never_registered = "message_decode_test: not a ustring";
 
 }  // namespace
+
+
+
+// The host holds every string the shadeops pass as a hash (shadingsys.cpp
+// makes them into ustrings when liboslexec is loaded). Hash with strhash:
+// making a ustringhash from the text would register it here and prove
+// nothing.
+static void
+test_shadeops_strings_registered()
+{
+    OIIO_CHECK_ASSERT(ustring::from_hash(strhash(never_registered)).c_str()
+                      == nullptr);
+#define CHECK_REGISTERED(str, var_name)                                     \
+    OIIO_CHECK_EQUAL(pvt::ShadeopsHashes::var_name.hash(), strhash(str));   \
+    OIIO_CHECK_ASSERT(ustring::from_hash(strhash(str)).c_str() != nullptr); \
+    OIIO_CHECK_EQUAL(ustring::from_hash(strhash(str)).string(),             \
+                     std::string(str));
+    OSL_SHADEOPS_STRINGS(CHECK_REGISTERED)
+#undef CHECK_REGISTERED
+}
 
 
 
@@ -84,9 +109,34 @@ test_unknown_hashes()
 
 
 
+// printfmt and its siblings hash their format with pvt::fmt_spec_hash. A
+// character array must hash like its text up to the first zero, whether it
+// is a string literal or a larger buffer holding a shorter string. On the
+// host, ustringhash(str, len) stops at the first zero by itself; on a GPU
+// device it hashes all len bytes, so fmt_spec_hash must find the end. Only
+// the unterminated array tells the two apart here, on the host.
+static void
+test_fmt_spec_hash()
+{
+    OIIO_CHECK_EQUAL(pvt::fmt_spec_hash("Lookup failed").hash(),
+                     strhash("Lookup failed"));
+    char buffer[64] = "Lookup failed";
+    OIIO_CHECK_EQUAL(pvt::fmt_spec_hash(buffer).hash(),
+                     strhash("Lookup failed"));
+    const char const_buffer[64] = "Lookup failed";
+    OIIO_CHECK_EQUAL(pvt::fmt_spec_hash(const_buffer).hash(),
+                     strhash("Lookup failed"));
+    const char unterminated[3] = { 'a', 'b', 'c' };
+    OIIO_CHECK_EQUAL(pvt::fmt_spec_hash(unterminated).hash(), strhash("abc"));
+}
+
+
+
 int
 main(int /*argc*/, char* /*argv*/[])
 {
+    test_shadeops_strings_registered();
     test_unknown_hashes();
+    test_fmt_spec_hash();
     return unit_test_failures;
 }
