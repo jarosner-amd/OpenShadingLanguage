@@ -720,6 +720,12 @@ if (OSL_BUILD_TESTS AND BUILD_TESTING)
     set_target_properties (message_decode_test PROPERTIES FOLDER "Unit Tests")
     add_test (unit_message_decode ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/message_decode_test)
 
+    add_executable (shading_state_test shading_state_test.cpp)
+    target_link_libraries (shading_state_test PRIVATE oslexec ${CMAKE_DL_LIBS})
+    target_include_directories (shading_state_test  BEFORE PRIVATE ${OpenImageIO_INCLUDES})
+    set_target_properties (shading_state_test PROPERTIES FOLDER "Unit Tests")
+    add_test (unit_shading_state ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shading_state_test)
+
     # Check the AMDGPU device shadeops of each architecture against the host
     # shadeops bitcode. Needs no GPU.
     if (OSL_ENABLE_AMDGPU)
