@@ -2232,6 +2232,15 @@ ShadingSystemImpl::getattribute(string_view name, TypeDesc type, void* val)
             == (char*)&colorsystem().colorspace());
         return true;
     }
+    // The whole uniform shading state as one flat block, for a renderer that
+    // copies it to device memory (see the getattribute() docs in oslexec.h).
+    // The layout stays private: the caller only moves the bytes.
+    if (name == "shading_state_uniform" && type.basetype == TypeDesc::PTR) {
+        *(void**)val = &m_shading_state_uniform;
+        return true;
+    }
+    ATTR_DECODE("shading_state_uniform:size", long long,
+                sizeof(pvt::ShadingStateUniform));
     if (name == "osl:simd" && type == TypeDesc::STRING) {
         *(const char**)val = ustring(osl_simd_caps()).c_str();
         return true;

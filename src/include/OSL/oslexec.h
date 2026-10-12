@@ -439,6 +439,23 @@ public:
     ///   library build dependencies and their versions (for example,
     ///   "OIIO-2.3.0,LLVM-10.0.0,OpenEXR-2.5.0").
     ///
+    /// - `ptr shading_state_uniform`, `longlong shading_state_uniform:size` :
+    ///   OSL's uniform shading state and its size in bytes. This is the state
+    ///   that shadeops read through `ShaderGlobals::shadingStateUniform`: the
+    ///   color system, the name of "common" space, `unknown_coordsys_error`
+    ///   and `max_warnings_per_thread`. A renderer that runs shaders on a GPU
+    ///   copies these bytes to device memory and sets
+    ///   `ShaderGlobals::shadingStateUniform` of every shading point to the
+    ///   copy. The block is flat, holds no pointers, and every string in it
+    ///   is a 64-bit hash, so the copy is valid on the device as it is.
+    ///   Align the copy to at least 16 bytes. The layout is private and may
+    ///   change in any release: copy the size that is reported here, and do
+    ///   not look inside. The block reflects the attributes it is made from
+    ///   (`colorspace`, `commonspace`, `unknown_coordsys_error` and
+    ///   `max_warnings_per_thread`) as they are when it is copied, so copy it
+    ///   after setting them. It stays valid until the ShadingSystem is
+    ///   destroyed.
+    ///
     /// - `stat:compiled_<metric>:<subkey>` : Post-optimization compile
     ///   statistics aggregated over *all* shader groups, where `<metric>` is
     ///   one of `active_layers`, `network_depth`, `texture_ops`, or
