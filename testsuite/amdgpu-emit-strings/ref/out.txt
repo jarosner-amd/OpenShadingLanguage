@@ -1,0 +1,24 @@
+Compiled hash.osl -> hash.oso
+Compiled strlen.osl -> strlen.oso
+
+AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=L symbol=__direct_callable__osl_layer_group_h1_name_L
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_h1
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_h1_name_L
+Wrote amdgpu_h1_gfx1201.ll
+check amdgpu_h1_gfx1201.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 3
+    __direct_callable__fused_h1_name_L
+    __direct_callable__osl_init_group_h1
+    __direct_callable__osl_layer_group_h1_name_L
+  target-cpu: gfx1201
+  every define has target-cpu: yes
+  code object version: 600
+  host pointers: none
+  declares osl noise: no
+  osl functions declared: none
+  osl functions called: none
+  renderer services declared: none
+ERROR: Cannot compile shader group "s1" for AMDGPU architecture "gfx1201": these OSL operations are not supported on AMDGPU yet: osl_strlen_is
+

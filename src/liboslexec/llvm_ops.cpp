@@ -1023,6 +1023,19 @@ osl_range_check_err(int indexvalue, int length, ustringhash_pod symname,
 
 
 
+#if OSL_GPU_DEVICE_COMPILE && OSL_SHADEOPS_RS_ONLY
+// hash(string) needs only the string's hash, which is all a GPU device has:
+// the same value as the CPU version in opstring.cpp, (int)ustring::hash().
+// The other string shadeops need the characters and stay host-only.
+OSL_SHADEOP int
+osl_hash_is(ustringhash_pod s)
+{
+    return (int)s;
+}
+#endif
+
+
+
 OSL_SHADEOP int
 osl_range_check(int indexvalue, int length, ustringhash_pod symname,
                 OpaqueExecContextPtr ec, ustringhash_pod sourcefile,
