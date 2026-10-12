@@ -571,7 +571,7 @@ macro (osl_add_all_tests)
         if (NOT USE_LLVM_BITCODE)
             TESTSUITE ( amdgpu-emit )
         elseif (OSL_ENABLE_AMDGPU)
-            TESTSUITE ( amdgpu-emit-linked )
+            TESTSUITE ( amdgpu-emit-linked amdgpu-emit-strings )
             # The test compiles each artifact to a device object with llc.
             foreach (_t amdgpu-emit-linked amdgpu-emit-linked.rs_bitcode
                         amdgpu-emit-linked.opt
