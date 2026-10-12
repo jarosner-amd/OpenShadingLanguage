@@ -1,0 +1,11 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// hash() of a string that is not known when the shader is compiled. It needs
+// only the string's hash, so it is built into the AMDGPU device shadeops.
+shader hash (output color Cout = 0)
+{
+    string s = u > 0.5 ? "spam" : "eggs";
+    Cout = color(hash(s) & 255) / 255;
+}

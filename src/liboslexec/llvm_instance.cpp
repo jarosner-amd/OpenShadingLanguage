@@ -2672,6 +2672,27 @@ BackendLLVM::link_amdgpu_shadeops(string_view arch)
             group().name(), arch, err, verify_errors);
         return nullptr;
     }
+
+    // A renderer supplies only rs_* functions. An osl_* function that is
+    // still called but not defined here is one that AMDGPU cannot run yet
+    // (for example a string operation that needs the characters). Report it
+    // now, rather than leave it for the renderer's link, which would invite
+    // renderers to define OSL's internal functions themselves.
+    std::string missing;
+    for (const llvm::Function& fn : *module) {
+        if (fn.isDeclaration() && !fn.use_empty()
+            && fn.getName().starts_with("osl_")) {
+            if (!missing.empty())
+                missing += ", ";
+            missing += fn.getName().str();
+        }
+    }
+    if (!missing.empty()) {
+        shadingcontext()->errorfmt(
+            "Cannot compile shader group \"{}\" for AMDGPU architecture \"{}\": these OSL operations are not supported on AMDGPU yet: {}",
+            group().name(), arch, missing);
+        return nullptr;
+    }
     return module;
 }
 #endif
