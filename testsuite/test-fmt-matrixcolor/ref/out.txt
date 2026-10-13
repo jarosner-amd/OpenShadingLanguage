@@ -1,6 +1,7 @@
 Compiled test_2wrongspaces.osl -> test_2wrongspaces.oso
 Compiled test_const_matrixcolor.osl -> test_const_matrixcolor.oso
 Compiled test_matrixcolor.osl -> test_matrixcolor.oso
+Compiled test_prependmatrix.osl -> test_prependmatrix.oso
 incorrect color space and matrix transform names:
 
 Output Cout_color to matrixcolor1.tif
@@ -27,4 +28,8 @@ Output Cout_color to matrixcolor1wrong.tif
 Output Cout_matrix to matrixcolor2wrong.tif
 ERROR: Unknown color space transformation "spam" -> "eggs"
 ERROR: Unknown transformation "eggs"
+ERROR: Unknown transformation "spam"
+test_prependmatrix.osl:
+
+Output Cout_matrix to prependmatrix.tif
 ERROR: Unknown transformation "spam"
