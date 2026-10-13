@@ -1,0 +1,15 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// A message whose name is not known when the shader is compiled. On AMDGPU
+// each message needs a slot in the group's data, chosen by its name, so
+// the group must not compile, with an error that says why.
+shader message_name (output color Cout = 0)
+{
+    string name = u > 0.5 ? "spam" : "eggs";
+    setmessage(name, 1.0);
+    float f = 0;
+    getmessage(name, f);
+    Cout = color(f);
+}

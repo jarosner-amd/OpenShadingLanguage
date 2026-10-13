@@ -1,0 +1,22 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// Layer A of a message group: sets a message of each kind (float, color,
+// float array, string, closure, closure array) for layer B to read.
+// On AMDGPU each message lives in a slot of the group's own data.
+shader message_set (output float dummy = 0)
+{
+    setmessage("f", u);
+    setmessage("c", color(u, v, 0.5));
+    float arr[4] = { 1, 2, 3, 4 };
+    setmessage("arr", arr);
+    setmessage("s", "hello");
+    closure color cc = 0.5 * diffuse(N);
+    setmessage("cc", cc);
+    closure color ca[2];
+    ca[0] = diffuse(N);
+    ca[1] = 0.25 * reflection(N);
+    setmessage("ca", ca);
+    dummy = u + v;  // not constant, so the connection to B is kept
+}
