@@ -204,13 +204,18 @@ To build the shadeops in, configure with:
 
 Built in: the math, noise and spline shadeops, matrices and named spaces,
 color functions, the printf, error and warning shims, the texture, trace and
-point cloud shadeops, the texture and trace option setters, and closures.
+point cloud shadeops, the texture and trace option setters, closures, and
+messages between the layers of a group (`setmessage`, `getmessage`).
 Not built in yet: the string operations that need a string table
-(`opstring.cpp`), messages (`opmessage.cpp`), and `getattribute` and
-interpolated parameters (`osl_get_attribute`, `osl_bind_interpolated_param`).
+(`opstring.cpp`), and `getattribute` and interpolated parameters
+(`osl_get_attribute`, `osl_bind_interpolated_param`).
 A shader group that needs one of these does not compile for AMDGPU; the
 error names the missing operations. A renderer must not define OSL's own
 `osl_*` functions.
+Messages are kept in the group's data (`llvm_groupdata_size` includes
+them), so their names must be known when the group is compiled: a message
+name, or a `getmessage` source, that is computed while shading is an error.
+A `getmessage` with the source `"trace"` still goes to `rs_trace_get`.
 Printing a closure (`printf("%s", Ci)`) is not supported on GPUs.
 
 What the renderer supplies. The built-in shadeops reach the renderer only
