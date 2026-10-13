@@ -304,7 +304,10 @@ public:
     ///                              the getattribute() docs). Closures
     ///                              must be registered with no prepare or
     ///                              setup function, which would be host
-    ///                              addresses in the artifact.
+    ///                              addresses in the artifact. Messages
+    ///                              (setmessage, getmessage) are kept in the
+    ///                              group's data, so their names must be
+    ///                              constant when the group is compiled.
     ///    int llvm_jit_aggressive  Use LLVM "aggressive" JIT mode. (0)
     ///    int vector_width       Vector width to allow for SIMD ops (4).
     ///    int llvm_debugging_symbols  When JITing, generate debug symbols
