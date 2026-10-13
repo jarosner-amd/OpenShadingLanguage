@@ -262,6 +262,7 @@ if (USE_LLVM_BITCODE)
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opcolor.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opfmt.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opmatrix.cpp
+            ${CMAKE_SOURCE_DIR}/src/liboslexec/opmessage.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opnoise.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opspline.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/optexture.cpp
