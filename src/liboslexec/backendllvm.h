@@ -430,6 +430,24 @@ public:
     llvm::Value* groupdata_field_ptr(int fieldnum,
                                      TypeDesc type = TypeDesc::UNKNOWN);
 
+    /// The groupdata field holding the MessageSlot of a constant message
+    /// name, or -1 if it has none. Only AMDGPU groups have message slots
+    /// (see llvm_type_groupdata), and the field numbers exist once the
+    /// groupdata type has been built.
+    int message_slot_field(ustring name) const
+    {
+        auto found = m_message_slot_fields.find(name);
+        return found != m_message_slot_fields.end() ? found->second : -1;
+    }
+
+    /// The type a message value of type `ts` is stored as: closures as
+    /// pointers (PTR, with the same array length), as osl_setmessage does.
+    static TypeDesc message_type(const TypeSpec& ts)
+    {
+        return ts.is_closure_based() ? TypeDesc(TypeDesc::PTR, ts.arraylength())
+                                     : ts.simpletype();
+    }
+
     /// Return the userdata base pointer.
     llvm::Value* userdata_base_ptr() const { return m_llvm_userdata_base_ptr; }
 
@@ -686,6 +704,7 @@ private:
     // LLVM stuff
     AllocationMap m_named_values;
     std::map<const Symbol*, int> m_param_order_map;
+    std::map<ustring, int> m_message_slot_fields;  ///< see message_slot_field
     llvm::Value* m_llvm_shaderglobals_ptr;
     llvm::Value* m_llvm_groupdata_ptr;
     llvm::Value* m_llvm_interactive_params_ptr;
