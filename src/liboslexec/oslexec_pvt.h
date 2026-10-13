@@ -1817,6 +1817,27 @@ private:
 };
 
 
+/// One message of a shader group compiled for AMDGPU. The device has no
+/// MessageList, so each constant message name gets one of these in the
+/// group's private groupdata, followed by room for the largest value any
+/// setmessage of that name stores. Group init zeroes `state`. The fields
+/// mirror Message: osl_setmessage_slot and osl_getmessage_slot apply the
+/// same rules as osl_setmessage and osl_getmessage.
+struct MessageSlot {
+    enum State : int32_t { None = 0, Set = 1, Queried = 2 };
+    int32_t state;        ///< None, Set, or Queried (getmessage found nothing)
+    int32_t layeridx;     ///< instance id of the layer that set or queried it
+    uint64_t type;        ///< TypeDesc as 64 bits; closures as PTR
+    uint64_t type_name;   ///< hash of the type name used in error messages
+    uint64_t sourcefile;  ///< hash of the file of the setmessage or query
+    int32_t sourceline;   ///< line of the setmessage or query
+    int32_t pad;
+    // The value follows, 8-byte aligned.
+};
+static_assert(sizeof(MessageSlot) == 40, "MessageSlot layout");
+static_assert(alignof(MessageSlot) == 8, "MessageSlot alignment");
+
+
 #if OSL_USE_BATCHED
 
 struct BatchedMessageBuffer {

@@ -22,7 +22,23 @@
     X("Color space transformation \"{}\" -> \"{}\" is not available on "  \
       "this device",                                                      \
       color_transform_unavailable)                                        \
-    X("Unknown noise type \"{}\"", unknown_noise_type)
+    X("Unknown noise type \"{}\"", unknown_noise_type)                    \
+    X("message \"{}\" already exists (created here: {}:{})"               \
+      " cannot set again from {}:{}",                                     \
+      message_exists)                                                     \
+    X("message \"{}\" was queried before being set (queried here: {}:{})" \
+      " setting it now ({}:{}) would lead to inconsistent results",       \
+      message_queried_before_set)                                         \
+    X("type mismatch for message \"{}\" ({} as {} here: {}:{})"           \
+      " cannot fetch as {} from {}:{}",                                   \
+      message_type_mismatch)                                              \
+    X("message \"{}\" was set by layer #{} ({}:{})"                       \
+      " but is being queried by layer #{} ({}:{})"                        \
+      " - messages may only be transferred from nodes "                   \
+      "that appear earlier in the shading network",                       \
+      message_wrong_layer_order)                                          \
+    X("created", created)                                                 \
+    X("queried", queried)
 
 OSL_NAMESPACE_BEGIN
 namespace pvt {
