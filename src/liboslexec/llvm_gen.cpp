@@ -3539,6 +3539,55 @@ LLVMGEN(llvm_gen_getmessage)
         return true;
     }
 
+    if (rop.is_amdgpu_backend()) {
+        // AMDGPU keeps each message in a slot of the group data (see
+        // llvm_type_groupdata), so the name must be constant, and so must a
+        // source, which is ignored unless it is "trace" (as in
+        // osl_getmessage).
+        if (Name.is_constant() && (!has_source || Source.is_constant())) {
+            int field = rop.message_slot_field(Name.get_string());
+            if (field < 0) {
+                // No layer sets this message, and failed queries are not
+                // recorded (strict_messages is off): nothing to find.
+                rop.llvm_store_value(rop.ll.constant(0), Result);
+                return true;
+            }
+            TypeDesc type = BackendLLVM::message_type(Data.typespec());
+            // The type names as osl_getmessage prints them: the querying
+            // type, and the type of a message stored in the slot.
+            ustring type_name(Data.typespec().is_closure_based()
+                                  ? "closure color"
+                                  : type.c_str());
+            ustring slot_type_name(type == TypeDesc::PTR ? "closure color"
+                                                         : type.c_str());
+            llvm::Value* args[] = {
+                rop.sg_void_ptr(),
+                rop.groupdata_field_ptr(field),
+                rop.llvm_load_value(Name),
+                rop.ll.constant(type),
+                rop.llvm_const_hash(type_name),
+                rop.llvm_const_hash(slot_type_name),
+                rop.ll.constant(int(type.size())),
+                rop.llvm_void_ptr(Data),
+                rop.ll.constant((int)Data.has_derivs()),
+                rop.ll.constant(rop.inst()->id()),
+                rop.llvm_const_hash(op.sourcefile()),
+                rop.ll.constant(op.sourceline()),
+                rop.ll.constant((int)rop.shadingsys().strict_messages()),
+            };
+            llvm::Value* r = rop.ll.call_function("osl_getmessage_slot", args);
+            rop.llvm_store_value(r, Result);
+            return true;
+        }
+#ifdef OSL_LLVM_AMDGPU_BITCODE
+        // Fall through to the host call: linking the AMDGPU shadeops then
+        // rejects the group, naming osl_getmessage.
+        rop.shadingcontext()->errorfmt(
+            "getmessage needs a constant message name and source on AMDGPU ({}:{})",
+            op.sourcefile(), op.sourceline());
+#endif
+    }
+
     llvm::Value* args[9];
     args[0] = rop.sg_void_ptr();
     args[1] = has_source ? rop.llvm_load_value(Source)
@@ -3576,6 +3625,41 @@ LLVMGEN(llvm_gen_setmessage)
     Symbol& Name = *rop.opargsym(op, 0);
     Symbol& Data = *rop.opargsym(op, 1);
     OSL_DASSERT(Name.typespec().is_string());
+
+    if (rop.is_amdgpu_backend()) {
+        // AMDGPU keeps each message in a slot of the group data (see
+        // llvm_type_groupdata); every constant name has one.
+        int field = Name.is_constant()
+                        ? rop.message_slot_field(Name.get_string())
+                        : -1;
+        if (field >= 0) {
+            TypeDesc type = BackendLLVM::message_type(Data.typespec());
+            // The type name as osl_getmessage prints a stored message's.
+            ustring slot_type_name(type == TypeDesc::PTR ? "closure color"
+                                                         : type.c_str());
+            llvm::Value* args[] = {
+                rop.sg_void_ptr(),
+                rop.groupdata_field_ptr(field),
+                rop.llvm_load_value(Name),
+                rop.ll.constant(type),
+                rop.llvm_const_hash(slot_type_name),
+                rop.ll.constant(int(type.size())),
+                rop.llvm_void_ptr(Data),
+                rop.ll.constant(rop.inst()->id()),
+                rop.llvm_const_hash(op.sourcefile()),
+                rop.ll.constant(op.sourceline()),
+            };
+            rop.ll.call_function("osl_setmessage_slot", args);
+            return true;
+        }
+#ifdef OSL_LLVM_AMDGPU_BITCODE
+        // Fall through to the host call: linking the AMDGPU shadeops then
+        // rejects the group, naming osl_setmessage.
+        rop.shadingcontext()->errorfmt(
+            "setmessage needs a constant message name on AMDGPU ({}:{})",
+            op.sourcefile(), op.sourceline());
+#endif
+    }
 
     llvm::Value* args[7];
     args[0] = rop.sg_void_ptr();

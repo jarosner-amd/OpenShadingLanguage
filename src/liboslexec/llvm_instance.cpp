@@ -425,6 +425,66 @@ BackendLLVM::llvm_type_groupdata()
             ++order;
         }
     }
+
+    // AMDGPU only: the device has no MessageList, so each constant message
+    // name gets a MessageSlot here, followed by room for the largest value
+    // any setmessage of that name stores (see osl_setmessage_slot). With
+    // strict_messages, a name that is only queried gets a slot too, to
+    // record the failed query as the CPU does. Non-constant names get no
+    // slot; the code generator rejects them. Group init clears the slots.
+    m_message_slot_fields.clear();
+    if (is_amdgpu_backend()) {
+        static ustring u_setmessage("setmessage"), u_getmessage("getmessage");
+        const bool strict = shadingsys().strict_messages();
+        std::map<ustring, size_t> value_sizes;  // sorted: stable layout
+        for (int layer = 0; layer < group().nlayers(); ++layer) {
+            if (layer_remap(layer) == -1)  // not compiled
+                continue;
+            ShaderInstance* inst = group()[layer];
+            for (const Opcode& op : inst->ops()) {
+                if (op.opname() == u_setmessage) {
+                    const Symbol& Name = *inst->argsymbol(op.firstarg());
+                    const Symbol& Data = *inst->argsymbol(op.firstarg() + 1);
+                    if (Name.is_constant()) {
+                        size_t& size = value_sizes[Name.get_string()];
+                        size = std::max(size,
+                                        message_type(Data.typespec()).size());
+                    }
+                } else if (op.opname() == u_getmessage && strict) {
+                    const int has_source = op.nargs() == 4;
+                    const Symbol& Name   = *inst->argsymbol(op.firstarg() + 1
+                                                            + has_source);
+                    if (has_source) {
+                        const Symbol& Source = *inst->argsymbol(op.firstarg()
+                                                                + 1);
+                        if (!Source.is_constant()
+                            || Source.get_string() == Strings::trace)
+                            continue;
+                    }
+                    if (Name.is_constant())
+                        value_sizes[Name.get_string()];  // no value unless set
+                }
+            }
+        }
+        if (!value_sizes.empty()) {
+            offset    = OIIO::round_to_multiple_of_pow2(offset, 8);
+            max_align = std::max(max_align, alignof(MessageSlot));
+        }
+        for (const auto& [name, size] : value_sizes) {
+            // As int64s, so that the slot is 8-byte aligned.
+            int nwords = int((sizeof(MessageSlot) + size + 7) / 8);
+            fields.push_back(ll.type_array(ll.type_int64(), nwords));
+            m_groupdata_field_names.emplace_back(
+                fmtformat("message_{}_", name));
+            if (llvm_debug() >= 2)
+                print("  message \"{}\", field {}, size {}, offset {}\n", name,
+                      order, nwords * 8, offset);
+            m_message_slot_fields[name] = order;
+            offset += nwords * 8;
+            ++order;
+        }
+    }
+
     group().llvm_groupdata_size(offset);
     group().llvm_groupdata_alignment(max_align);
     if (llvm_debug() >= 2)
@@ -1379,6 +1439,10 @@ BackendLLVM::build_llvm_init()
         ll.op_memset(ll.void_ptr(userdata_initialized_ref(0)), 0, sz,
                      4 /*align*/);
     }
+    // It also forgets all messages: each message slot (AMDGPU only) starts
+    // with MessageSlot::state, set to None.
+    for (const auto& slot : m_message_slot_fields)
+        ll.op_store(ll.constant(0), groupdata_field_ptr(slot.second, TypeInt));
 
     // Group init also needs to allot space for ALL layers' params
     // that are closures (to avoid weird order of layer eval problems).
