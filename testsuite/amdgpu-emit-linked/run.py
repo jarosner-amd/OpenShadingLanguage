@@ -42,11 +42,16 @@ command += amdgpu("g6", "services", "--amdgpu-arch gfx1201 --amdgpu-format llvmi
 command += amdgpu("g7", "lookups", "--amdgpu-arch gfx1201 --amdgpu-format llvmir")
 # Closures, with their memory from rs_allocate_closure.
 command += amdgpu("g8", "closures", "--amdgpu-arch gfx1201 --amdgpu-format llvmir")
+# Messages from layer A to layer B, kept in the group's own data.
+command += testshade("-g 1 1 --groupname g9 --layer A message_set"
+                     + " --layer B message_get --connect A dummy B dummy"
+                     + " --amdgpu --amdgpu-arch gfx1201 --amdgpu-format llvmir"
+                     + " --save-amdgpu -o Cout null")
 for f in [ "amdgpu_g1_gfx1100.ll", "amdgpu_g1_gfx1201.ll",
            "amdgpu_g2_gfx1100.ll", "amdgpu_g2_gfx1201.ll",
            "amdgpu_g3_gfx1201.bc", "amdgpu_g5_gfx1100.ll",
            "amdgpu_g6_gfx1201.ll", "amdgpu_g7_gfx1201.ll",
-           "amdgpu_g8_gfx1201.ll" ] :
+           "amdgpu_g8_gfx1201.ll", "amdgpu_g9_gfx1201.ll" ] :
     command += check(f)
 
 outputs = [ "out.txt" ]

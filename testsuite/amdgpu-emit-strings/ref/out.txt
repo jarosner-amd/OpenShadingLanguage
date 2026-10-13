@@ -1,4 +1,5 @@
 Compiled hash.osl -> hash.oso
+Compiled message_name.osl -> message_name.oso
 Compiled strlen.osl -> strlen.oso
 
 AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
@@ -22,3 +23,7 @@ check amdgpu_h1_gfx1201.ll:
   renderer services declared: none
 ERROR: Cannot compile shader group "s1" for AMDGPU architecture "gfx1201": these OSL operations are not supported on AMDGPU yet: osl_strlen_is
 
+ERROR: setmessage needs a constant message name on AMDGPU (message_name.osl:11)
+
+ERROR: getmessage needs a constant message name and source on AMDGPU (message_name.osl:13)
+ERROR: Cannot compile shader group "n1" for AMDGPU architecture "gfx1201": these OSL operations are not supported on AMDGPU yet: osl_getmessage, osl_setmessage
