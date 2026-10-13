@@ -1,0 +1,25 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// Layer B of a message group: reads every message layer A sets, and one
+// that nobody sets. The message shadeops are built into the AMDGPU device
+// shadeops and report errors through rs_errorfmt, so the artifact should
+// declare only rs_* functions.
+shader message_get (float dummy = 0, output color Cout = 0)
+{
+    // Reading dummy runs layer A before the messages are read.
+    color forced = color(dummy * 0.0001);
+    float f      = -1;
+    color c      = -1;
+    float arr[4] = { -1, -1, -1, -1 };
+    string s     = "";
+    closure color cc;
+    closure color ca[2];
+    int ok = getmessage("f", f) + getmessage("c", c) + getmessage("arr", arr)
+             + getmessage("s", s) + getmessage("cc", cc)
+             + getmessage("ca", ca) + getmessage("missing", f);
+    Ci   = cc + ca[0] + ca[1];
+    Cout = c * f + color(arr[3] * 0.01) + color(ok * 0.1)
+           + color(s == "hello" ? 0.001 : 0) + forced;
+}

@@ -3,6 +3,8 @@ Compiled entry_a.osl -> entry_a.oso
 Compiled entry_b.osl -> entry_b.oso
 Compiled entry_c.osl -> entry_c.oso
 Compiled lookups.osl -> lookups.oso
+Compiled message_get.osl -> message_get.oso
+Compiled message_set.osl -> message_set.oso
 Compiled ops.osl -> ops.oso
 Compiled services.osl -> services.oso
 Compiled test.osl -> test.oso
@@ -60,6 +62,13 @@ AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
   export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_g8
   export 2: kind=fused layer=- symbol=__direct_callable__fused_g8_name_L
 Wrote amdgpu_g8_gfx1201.ll
+Connect A.dummy to B.dummy
+
+AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=B symbol=__direct_callable__osl_layer_group_g9_name_B
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_g9
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_g9_name_B
+Wrote amdgpu_g9_gfx1201.ll
 check amdgpu_g1_gfx1100.ll:
   triple: amdgcn-amd-amdhsa
   exports: 3
@@ -184,3 +193,18 @@ check amdgpu_g8_gfx1201.ll:
   osl functions called: none
   renderer services declared: rs_allocate_closure
 llc gfx1201 amdgpu_g8_gfx1201.ll: ok
+check amdgpu_g9_gfx1201.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 3
+    __direct_callable__fused_g9_name_B
+    __direct_callable__osl_init_group_g9
+    __direct_callable__osl_layer_group_g9_name_B
+  target-cpu: gfx1201
+  every define has target-cpu: yes
+  code object version: 600
+  host pointers: none
+  declares osl noise: no
+  osl functions declared: none
+  osl functions called: none
+  renderer services declared: rs_allocate_closure rs_errorfmt
+llc gfx1201 amdgpu_g9_gfx1201.ll: ok
