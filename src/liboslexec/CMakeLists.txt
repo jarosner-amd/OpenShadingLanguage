@@ -664,6 +664,12 @@ if (OSL_BUILD_TESTS AND BUILD_TESTING)
     set_target_properties (dual_test PROPERTIES FOLDER "Unit Tests")
     add_test (unit_dual ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/dual_test)
 
+    add_executable (encodedtypes_test encodedtypes_test.cpp)
+    target_link_libraries (encodedtypes_test PRIVATE oslexec ${CMAKE_DL_LIBS})
+    target_include_directories (encodedtypes_test  BEFORE PRIVATE ${OpenImageIO_INCLUDES})
+    set_target_properties (encodedtypes_test PROPERTIES FOLDER "Unit Tests")
+    add_test (unit_encodedtypes ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/encodedtypes_test)
+
     add_executable (llvmutil_test llvmutil_test.cpp)
     target_link_libraries (llvmutil_test PRIVATE oslexec ${CMAKE_DL_LIBS})
     target_include_directories (llvmutil_test  BEFORE PRIVATE ${OpenImageIO_INCLUDES})
