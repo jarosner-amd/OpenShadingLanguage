@@ -177,6 +177,17 @@ attributes cannot be changed after the first shader group is compiled, and
 of your shader. This writes `amdgpu_mygroup_gfx1100.bc` to the current
 directory.
 
+`testrender --amdgpu` compiles every shader group of a scene the same way,
+without rendering (no output image is needed or written):
+
+    testrender --amdgpu --amdgpu-arch gfx1100 --save-amdgpu scene.xml
+
+It writes one `amdgpu_<material>_<group>_<arch>.bc` per shader group. With
+`OSL_ENABLE_AMDGPU`, testrender's build also compiles its own renderer
+services (the `rs_*` functions) for each architecture, to
+`rs_simplerend_amdgpu_<arch>.bc` in its build folder. On the GPU they do
+not look up textures yet, and they drop errors and prints.
+
 This needs LLVM 19 or newer with the AMDGPU target, and one of two builds:
 
 * With `USE_LLVM_BITCODE=OFF` (the default on Windows), nothing more is
