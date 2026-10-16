@@ -1,0 +1,2 @@
+# Excluded from C++-backend testing: testrender --amdgpu emits AMDGPU code and
+# never runs a shader, so there is nothing for the C++ backend to run.
