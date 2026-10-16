@@ -79,6 +79,24 @@ if (OSL_USE_OPTIX)
              DESTINATION ${OSL_PTX_INSTALL_DIR})
 endif()
 
+if (OSL_ENABLE_AMDGPU)
+    # testrender's renderer services (src/test_common/rs_simplerend.cpp) as
+    # AMDGPU bitcode, one file per architecture: the rs_* functions that a
+    # renderer links with each shader group artifact. Neither embedded nor
+    # installed, because testrender does not run shaders on AMD GPUs yet.
+    set (amdgpu_include_dirs ${OpenImageIO_INCLUDES}
+         ${CMAKE_SOURCE_DIR}/src/include ${CMAKE_BINARY_DIR}/include
+         ${IMATH_INCLUDES})
+    foreach (arch ${OSL_HIP_TARGET_ARCHS})
+        MAKE_HIP_BITCODE ( ${PROJECT_SOURCE_DIR}/src/test_common/rs_simplerend.cpp
+                           "_amdgpu_${arch}" ${arch} rend_lib_amdgpu_bc
+                           "${amdgpu_include_dirs}" )
+        list (APPEND rend_lib_amdgpu_bcs ${rend_lib_amdgpu_bc})
+    endforeach ()
+    add_custom_target (testrender_amdgpu_rend_lib ALL
+        DEPENDS ${rend_lib_amdgpu_bcs})
+endif ()
+
 if (CMAKE_COMPILER_IS_INTELCLANG)
     # To better match existing test results
     add_compile_options("-fp-model=precise")
