@@ -571,14 +571,21 @@ macro (osl_add_all_tests)
         if (NOT USE_LLVM_BITCODE)
             TESTSUITE ( amdgpu-emit )
         elseif (OSL_ENABLE_AMDGPU)
-            TESTSUITE ( amdgpu-emit-linked amdgpu-emit-strings )
-            # The test compiles each artifact to a device object with llc.
+            TESTSUITE ( amdgpu-emit-linked amdgpu-emit-strings
+                        amdgpu-emit-testrender )
+            # The tests compile each artifact to a device object with llc;
+            # amdgpu-emit-testrender also links it with testrender's
+            # renderer services for AMDGPU.
             foreach (_t amdgpu-emit-linked amdgpu-emit-linked.rs_bitcode
                         amdgpu-emit-linked.opt
-                        amdgpu-emit-linked.opt.rs_bitcode)
+                        amdgpu-emit-linked.opt.rs_bitcode
+                        amdgpu-emit-testrender amdgpu-emit-testrender.opt)
                 if (TEST ${_t})
                     set_property (TEST ${_t} APPEND PROPERTY ENVIRONMENT
-                                  OSL_AMDGPU_LLC=${OSL_AMDGPU_LLC})
+                                  OSL_AMDGPU_LLC=${OSL_AMDGPU_LLC}
+                                  OSL_AMDGPU_LLVM_LINK=${OSL_AMDGPU_LLVM_LINK}
+                                  OSL_AMDGPU_LLVM_DIS=${OSL_AMDGPU_LLVM_DIS}
+                                  OSL_TESTRENDER_RS_DIR=${CMAKE_BINARY_DIR}/src/testrender)
                 endif ()
             endforeach ()
         endif ()
