@@ -1,0 +1,115 @@
+Compiled checkerboard.osl -> checkerboard.oso
+Compiled envmap.osl -> envmap.oso
+Compiled layer.osl -> layer.oso
+Compiled matte.osl -> matte.oso
+Compiled ward.osl -> ward.oso
+Material 0 group "group":
+AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=layer1 symbol=__direct_callable__osl_layer_group_group_name_layer1
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_group
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_group_name_layer1
+Wrote amdgpu_0_group_gfx1201.ll
+Material 1 group "group":
+AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=layer1 symbol=__direct_callable__osl_layer_group_group_name_layer1
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_group
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_group_name_layer1
+Wrote amdgpu_1_group_gfx1201.ll
+Material 2 group "group":
+AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=layer1 symbol=__direct_callable__osl_layer_group_group_name_layer1
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_group
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_group_name_layer1
+Wrote amdgpu_2_group_gfx1201.ll
+Material 3 group "group":
+AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=layer1 symbol=__direct_callable__osl_layer_group_group_name_layer1
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_group
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_group_name_layer1
+Wrote amdgpu_3_group_gfx1201.ll
+Material 4 group "group":
+AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=layer1 symbol=__direct_callable__osl_layer_group_group_name_layer1
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_group
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_group_name_layer1
+Wrote amdgpu_4_group_gfx1201.ll
+check amdgpu_0_group_gfx1201.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 3
+    __direct_callable__fused_group_name_layer1
+    __direct_callable__osl_init_group_group
+    __direct_callable__osl_layer_group_group_name_layer1
+  target-cpu: gfx1201
+  every define has target-cpu: yes
+  code object version: 600
+  host pointers: none
+  declares osl noise: no
+  osl functions declared: none
+  osl functions called: none
+  renderer services declared: rs_allocate_closure rs_texture
+llc gfx1201 amdgpu_0_group_gfx1201.ll: ok
+link amdgpu_0_group_gfx1201.ll with the renderer services: complete
+check amdgpu_1_group_gfx1201.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 3
+    __direct_callable__fused_group_name_layer1
+    __direct_callable__osl_init_group_group
+    __direct_callable__osl_layer_group_group_name_layer1
+  target-cpu: gfx1201
+  every define has target-cpu: yes
+  code object version: 600
+  host pointers: none
+  declares osl noise: no
+  osl functions declared: none
+  osl functions called: none
+  renderer services declared: rs_allocate_closure
+llc gfx1201 amdgpu_1_group_gfx1201.ll: ok
+link amdgpu_1_group_gfx1201.ll with the renderer services: complete
+check amdgpu_2_group_gfx1201.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 3
+    __direct_callable__fused_group_name_layer1
+    __direct_callable__osl_init_group_group
+    __direct_callable__osl_layer_group_group_name_layer1
+  target-cpu: gfx1201
+  every define has target-cpu: yes
+  code object version: 600
+  host pointers: none
+  declares osl noise: no
+  osl functions declared: none
+  osl functions called: none
+  renderer services declared: rs_allocate_closure
+llc gfx1201 amdgpu_2_group_gfx1201.ll: ok
+link amdgpu_2_group_gfx1201.ll with the renderer services: complete
+check amdgpu_3_group_gfx1201.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 3
+    __direct_callable__fused_group_name_layer1
+    __direct_callable__osl_init_group_group
+    __direct_callable__osl_layer_group_group_name_layer1
+  target-cpu: gfx1201
+  every define has target-cpu: yes
+  code object version: 600
+  host pointers: none
+  declares osl noise: no
+  osl functions declared: none
+  osl functions called: none
+  renderer services declared: rs_allocate_closure
+llc gfx1201 amdgpu_3_group_gfx1201.ll: ok
+link amdgpu_3_group_gfx1201.ll with the renderer services: complete
+check amdgpu_4_group_gfx1201.ll:
+  triple: amdgcn-amd-amdhsa
+  exports: 3
+    __direct_callable__fused_group_name_layer1
+    __direct_callable__osl_init_group_group
+    __direct_callable__osl_layer_group_group_name_layer1
+  target-cpu: gfx1201
+  every define has target-cpu: yes
+  code object version: 600
+  host pointers: none
+  declares osl noise: no
+  osl functions declared: none
+  osl functions called: none
+  renderer services declared: rs_allocate_closure
+llc gfx1201 amdgpu_4_group_gfx1201.ll: ok
+link amdgpu_4_group_gfx1201.ll with the renderer services: complete

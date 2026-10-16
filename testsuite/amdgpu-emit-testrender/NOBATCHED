@@ -1,0 +1,2 @@
+# Excluded from batched testing: testrender --amdgpu only compiles for AMDGPU
+# and runs nothing.
