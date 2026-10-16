@@ -10,7 +10,8 @@ list (APPEND exec_headers
 
 set ( testshade_srcs
       testshade.cpp
-      simplerend.cpp )
+      simplerend.cpp
+      amdgpu_artifacts.cpp )
 
 if (OSL_BUILD_BATCHED)
     list(APPEND testshade_srcs
