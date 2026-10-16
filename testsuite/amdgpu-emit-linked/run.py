@@ -47,11 +47,15 @@ command += testshade("-g 1 1 --groupname g9 --layer A message_set"
                      + " --layer B message_get --connect A dummy B dummy"
                      + " --amdgpu --amdgpu-arch gfx1201 --amdgpu-format llvmir"
                      + " --save-amdgpu -o Cout null")
+# Getters the renderer names (testshade with --use_rs_bitcode) are declared.
+command += amdgpu("g10", "getters", "--use_rs_bitcode --amdgpu-arch gfx1201"
+                  + " --amdgpu-format llvmir")
 for f in [ "amdgpu_g1_gfx1100.ll", "amdgpu_g1_gfx1201.ll",
            "amdgpu_g2_gfx1100.ll", "amdgpu_g2_gfx1201.ll",
            "amdgpu_g3_gfx1201.bc", "amdgpu_g5_gfx1100.ll",
            "amdgpu_g6_gfx1201.ll", "amdgpu_g7_gfx1201.ll",
-           "amdgpu_g8_gfx1201.ll", "amdgpu_g9_gfx1201.ll" ] :
+           "amdgpu_g8_gfx1201.ll", "amdgpu_g9_gfx1201.ll",
+           "amdgpu_g10_gfx1201.ll" ] :
     command += check(f)
 
 outputs = [ "out.txt" ]
