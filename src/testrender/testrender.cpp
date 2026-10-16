@@ -22,6 +22,7 @@
 #include <OpenImageIO/timer.h>
 
 #include <OSL/oslexec.h>
+#include "hipraytracer.h"
 #include "shading.h"
 #include "simpleraytracer.h"
 
@@ -61,6 +62,10 @@ static std::string shaderpath;
 static bool shadingsys_options_set = false;
 static bool use_optix              = OIIO::Strutil::stoi(
     OIIO::Sysutil::getenv("TESTSHADE_OPTIX"));
+static bool use_amdgpu = false;  // compile for AMDGPU, emit artifacts only
+static std::vector<std::string> amdgpu_archs;
+static std::string amdgpu_format;  // "", "bitcode" or "llvmir"
+static bool save_amdgpu                 = false;
 static bool optix_no_inline             = false;
 static bool optix_no_inline_layer_funcs = false;
 static bool optix_no_merge_layer_funcs  = false;
@@ -114,6 +119,23 @@ set_shadingsys_options()
     shadingsys->attribute("userdata_isconnected", userdata_isconnected);
     if (!shaderpath.empty())
         shadingsys->attribute("searchpath:shader", shaderpath);
+    if (use_amdgpu) {
+        shadingsys->attribute("gpu_backend", "amdgpu");
+        if (amdgpu_archs.size()) {
+            std::vector<const char*> archs;
+            for (const std::string& arch : amdgpu_archs)
+                archs.push_back(arch.c_str());
+            shadingsys->attribute("gpu_archs",
+                                  TypeDesc(TypeDesc::STRING, int(archs.size())),
+                                  archs.data());
+        }
+        if (amdgpu_format.size())
+            shadingsys->attribute("gpu_artifact_kind", amdgpu_format);
+        // The texture handles are pointers into this process. They mean
+        // nothing on a GPU, and they would make the artifact differ from
+        // run to run.
+        shadingsys->attribute("opt_texture_handle", 0);
+    }
     if (extraoptions.size())
         shadingsys->attribute("options", extraoptions);
     if (texoptions.size())
@@ -155,6 +177,14 @@ getargs(int argc, const char* argv[])
       .help("Set resolution");
     ap.arg("--optix", &use_optix)
       .help("Use OptiX if available");
+    ap.arg("--amdgpu", &use_amdgpu)
+      .help("Compile the scene's shaders for AMDGPU and emit the artifacts, without rendering");
+    ap.arg("--amdgpu-arch %L:ARCH", &amdgpu_archs)
+      .help("AMDGPU architecture to compile for, e.g. gfx1100 (repeatable; default: one generic artifact, which a build with the device shadeops rejects)");
+    ap.arg("--amdgpu-format %s:FORMAT", &amdgpu_format)
+      .help("AMDGPU artifact format: bitcode (default) or llvmir");
+    ap.arg("--save-amdgpu", &save_amdgpu)
+      .help("Write each AMDGPU artifact to a file named amdgpu_<material>_<group>_<arch>.<bc|ll>");
     ap.arg("--debug", &debug1)
       .help("Lots of debugging info");
     ap.arg("--debug2", &debug2)
@@ -231,12 +261,30 @@ getargs(int argc, const char* argv[])
 
     // clang-format on
     ap.parse_args(argc, argv);
+
+    // The AMDGPU options only make sense together, and not with OptiX.
+    auto bad_options = [](string_view message) {
+        std::cerr << "testrender: " << message << "\n";
+        exit(EXIT_FAILURE);
+    };
+    if (!use_amdgpu
+        && (amdgpu_archs.size() || amdgpu_format.size() || save_amdgpu))
+        bad_options(
+            "--amdgpu-arch, --amdgpu-format and --save-amdgpu need --amdgpu.");
+    if (amdgpu_format.size() && amdgpu_format != "bitcode"
+        && amdgpu_format != "llvmir")
+        bad_options("Unknown --amdgpu-format \"" + amdgpu_format
+                    + "\". The choices are bitcode and llvmir.");
+    if (use_amdgpu && use_optix)
+        bad_options(
+            "--amdgpu cannot be combined with OptiX (--optix or the TESTSHADE_OPTIX environment variable).");
+
     if (scenefile.empty()) {
         std::cerr << "testrender: Must specify an xml scene file to open\n\n";
         ap.print_help();
         exit(EXIT_FAILURE);
     }
-    if (imagefile.empty()) {
+    if (imagefile.empty() && !use_amdgpu) {
         std::cerr << "testrender: Must specify a filename for output render\n\n";
         ap.print_help();
         exit(EXIT_FAILURE);
@@ -280,11 +328,17 @@ main(int argc, const char* argv[])
         aa = aaoverride;
 
     SimpleRaytracer* rend = nullptr;
+    HipRaytracer* hiprend = nullptr;
+    if (use_amdgpu) {
+        hiprend = new HipRaytracer;
+        hiprend->save_artifacts(save_amdgpu);
+        rend = hiprend;
+    }
 #if OSL_USE_OPTIX
-    if (use_optix)
+    else if (use_optix)
         rend = new OptixRaytracer;
-    else
 #endif
+    else
         rend = new SimpleRaytracer;
 
     // Other renderer and global options
@@ -329,6 +383,15 @@ main(int argc, const char* argv[])
     rend->parse_scene_xml(scenefile);
 
     rend->prepare_render();
+
+    if (hiprend) {
+        // Compiled for AMDGPU only: there is nothing to render.
+        bool ok = hiprend->ok() && !hiprend->had_error();
+        rend->clear();
+        delete shadingsys;
+        delete rend;
+        return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
 
     rend->pixelbuf.reset(ImageSpec(xres, yres, 3, TypeDesc::FLOAT));
 

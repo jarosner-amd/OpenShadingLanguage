@@ -8,6 +8,8 @@ set (testrender_srcs
      simpleraytracer.cpp
      scene.cpp
      bvh.cpp
+     hipraytracer.cpp
+     ../testshade/amdgpu_artifacts.cpp
      testrender.cpp)
 
 find_package(Threads REQUIRED)
