@@ -208,7 +208,11 @@ point cloud shadeops, the texture and trace option setters, closures, and
 messages between the layers of a group (`setmessage`, `getmessage`).
 Not built in yet: the string operations that need a string table
 (`opstring.cpp`), and `getattribute` and interpolated parameters
-(`osl_get_attribute`, `osl_bind_interpolated_param`).
+(`osl_get_attribute`, `osl_bind_interpolated_param`). A renderer that
+names its own getter functions instead (`supports("build_attribute_getter")`
+and `"build_interpolated_getter"` in its `RendererServices`) can use both:
+OSL declares each named function, returning `bool` with the arguments of
+the getter spec, and the renderer links it like the `rs_*` functions.
 A shader group that needs one of these does not compile for AMDGPU; the
 error names the missing operations. A renderer must not define OSL's own
 `osl_*` functions.
