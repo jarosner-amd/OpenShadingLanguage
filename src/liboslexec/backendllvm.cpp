@@ -715,6 +715,29 @@ BackendLLVM::llvm_call_function(const char* name, cspan<const Symbol*> args,
 
 
 llvm::Value*
+BackendLLVM::llvm_call_renderer_getter(const std::string& name,
+                                       cspan<llvm::Value*> args)
+{
+    if (is_amdgpu_backend() && !ll.module()->getFunction(name)) {
+        std::vector<llvm::Type*> types;
+        types.reserve(args.size());
+        for (llvm::Value* a : args)
+            types.push_back(a->getType());
+        llvm::Function* f = ll.make_function(name, false, ll.type_bool(),
+                                             types);
+        // A C++ bool is passed and returned zero-extended, as the
+        // renderer's compiler expects for its definition.
+        f->addRetAttr(llvm::Attribute::ZExt);
+        for (size_t i = 0; i < types.size(); ++i)
+            if (types[i] == ll.type_bool())
+                f->addParamAttr(unsigned(i), llvm::Attribute::ZExt);
+    }
+    return ll.call_function(name.c_str(), args);
+}
+
+
+
+llvm::Value*
 BackendLLVM::llvm_test_nonzero(Symbol& val, bool test_derivs)
 {
     const TypeSpec& ts(val.typespec());
