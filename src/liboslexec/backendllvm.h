@@ -542,6 +542,15 @@ public:
         return llvm_call_function(name, { &A, &B, &C }, deriv_ptrs);
     }
 
+    /// Generate a call to a getter function that the renderer named in an
+    /// AttributeGetterSpec or InterpolatedGetterSpec, returning its bool
+    /// result. On AMDGPU the renderer links its own code after OSL, so a
+    /// getter that is not in the module is declared here (returning bool,
+    /// with the types of the given arguments) and stays an external call
+    /// in the artifact. Other backends require it to be in the module.
+    llvm::Value* llvm_call_renderer_getter(const std::string& name,
+                                           cspan<llvm::Value*> args);
+
     TypeDesc llvm_typedesc(const TypeSpec& typespec)
     {
         if (typespec.is_closure_based())

@@ -984,8 +984,8 @@ BackendLLVM::llvm_assign_initial_value(const Symbol& sym, bool force)
                              after_block);
                 {
                     // bool ok = interpolated_getter();
-                    llvm::Value* ok
-                        = ll.call_function(spec.function_name().c_str(), args);
+                    llvm::Value* ok = llvm_call_renderer_getter(
+                        spec.function_name().string(), args);
                     ok = ll.op_bool_to_int(ok);
                     // status = 1 + ok;
                     status = ll.op_add(ll.constant(1), ok);

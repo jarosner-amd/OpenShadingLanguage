@@ -1,0 +1,18 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// Renderer-built getters: with --use_rs_bitcode, testshade names a getter
+// function for userdata "s" and for each getattribute. On AMDGPU the
+// renderer links those functions later, so OSL declares them and the
+// artifact keeps them as external rs_* calls.
+
+shader getters (float s = 0.5 [[ int lockgeom = 0 ]],
+                output color Cout = 0)
+{
+    int idx = 0;
+    float f = 0;
+    getattribute("shading:index", idx);
+    getattribute("some_attribute", f);
+    Cout = color(s, idx, f);
+}
