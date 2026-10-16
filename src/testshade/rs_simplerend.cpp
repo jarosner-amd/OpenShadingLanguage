@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
 
-#if !defined(__CUDACC__) && !defined(OSL_HOST_RS_BITCODE)
+#include <OpenImageIO/fmath.h>
+
+#include <OSL/oslconfig.h>
+
+// Compiled to host bitcode, or for a GPU device (CUDA or AMDGPU).
+#if !OSL_GPU && !defined(OSL_HOST_RS_BITCODE)
 #    error OSL_HOST_RS_BITCODE must be defined by your build system.
 #endif
 
-#include <OpenImageIO/fmath.h>
-
-#ifndef __CUDACC__
+#if !OSL_GPU_DEVICE_COMPILE
 #    include <OSL/fmt_util.h>
 #    include <OSL/journal.h>
 #endif
@@ -216,13 +219,13 @@ rs_texture(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename,
            float dsdy, float dtdy, int nchannels, float* result,
            float* dresultds, float* dresultdt, OSL::ustringhash* errormessage)
 {
-#ifndef __CUDA_ARCH__
+#if !OSL_GPU_DEVICE_COMPILE
     auto sg = (OSL::ShaderGlobals*)ec;
     return sg->renderer->texture(filename, texture_handle, texture_thread_info,
                                  options, sg, s, t, dsdx, dtdx, dsdy, dtdy,
                                  nchannels, result, dresultds, dresultdt,
                                  errormessage);
-#else
+#elif defined(__CUDA_ARCH__)
     if (!texture_handle)
         return false;
     const float4 fromTexture = osl_tex2DLookup(texture_handle, s, t, dsdx, dtdx,
@@ -230,6 +233,9 @@ rs_texture(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename,
     for (int c = 0; c < nchannels; ++c)
         result[c] = ((const float*)&fromTexture)[c];
     return true;
+#else
+    // No device textures on AMDGPU yet: as for a missing texture.
+    return false;
 #endif
 }
 
@@ -243,7 +249,7 @@ rs_texture3d(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename,
              float* dresultds, float* dresultdt, float* dresultdr,
              OSL::ustringhash* errormessage)
 {
-#ifndef __CUDA_ARCH__
+#if !OSL_GPU_DEVICE_COMPILE
     auto sg = (OSL::ShaderGlobals*)ec;
     return sg->renderer->texture3d(filename, texture_handle,
                                    texture_thread_info, options, sg, P, dPdx,
@@ -263,7 +269,7 @@ rs_environment(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename,
                float* result, float* dresultds, float* dresultdt,
                OSL::ustringhash* errormessage)
 {
-#ifndef __CUDA_ARCH__
+#if !OSL_GPU_DEVICE_COMPILE
     auto sg = (OSL::ShaderGlobals*)ec;
     return sg->renderer->environment(filename, texture_handle,
                                      texture_thread_info, options, sg, R, dRdx,
@@ -282,7 +288,7 @@ rs_get_texture_info(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename,
                     OSL::TypeDesc datatype, void* data,
                     OSL::ustringhash* errormessage)
 {
-#ifndef __CUDA_ARCH__
+#if !OSL_GPU_DEVICE_COMPILE
     auto sg = (OSL::ShaderGlobals*)ec;
     return sg->renderer->get_texture_info(filename, texture_handle,
                                           texture_thread_info, sg, subimage,
@@ -302,7 +308,7 @@ rs_get_texture_info_st(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename,
                        OSL::TypeDesc datatype, void* data,
                        OSL::ustringhash* errormessage)
 {
-#ifndef __CUDA_ARCH__
+#if !OSL_GPU_DEVICE_COMPILE
     auto sg = (OSL::ShaderGlobals*)ec;
     return sg->renderer->get_texture_info(filename, texture_handle, s, t,
                                           texture_thread_info, sg, subimage,
@@ -319,7 +325,7 @@ rs_pointcloud_search(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename,
                      bool sort, int* out_indices, float* out_distances,
                      int derivs_offset)
 {
-#ifndef __CUDA_ARCH__
+#if !OSL_GPU_DEVICE_COMPILE
     auto sg = (OSL::ShaderGlobals*)ec;
     return sg->renderer->pointcloud_search(sg, filename, center, radius,
                                            max_points, sort, out_indices,
@@ -334,7 +340,7 @@ rs_pointcloud_get(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename,
                   const int* indices, int count, OSL::ustringhash attr_name,
                   OSL::TypeDesc attr_type, void* out_data)
 {
-#ifndef __CUDA_ARCH__
+#if !OSL_GPU_DEVICE_COMPILE
     auto sg = (OSL::ShaderGlobals*)ec;
     return sg->renderer->pointcloud_get(sg, filename, indices, count, attr_name,
                                         attr_type, out_data);
@@ -349,7 +355,7 @@ rs_pointcloud_write(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename,
                     const OSL::ustringhash* names, const OSL::TypeDesc* types,
                     const void** data)
 {
-#ifndef __CUDA_ARCH__
+#if !OSL_GPU_DEVICE_COMPILE
     auto sg = (OSL::ShaderGlobals*)ec;
     return sg->renderer->pointcloud_write(sg, filename, pos, nattribs, names,
                                           types, data);
@@ -363,7 +369,7 @@ rs_trace(OSL::OpaqueExecContextPtr ec, OSL::TraceOpt& options,
          const OSL::Vec3& P, const OSL::Vec3& dPdx, const OSL::Vec3& dPdy,
          const OSL::Vec3& R, const OSL::Vec3& dRdx, const OSL::Vec3& dRdy)
 {
-#ifndef __CUDA_ARCH__
+#if !OSL_GPU_DEVICE_COMPILE
     auto sg = (OSL::ShaderGlobals*)ec;
     return sg->renderer->trace(options, sg, P, dPdx, dPdy, R, dRdx, dRdy);
 #else
@@ -375,7 +381,7 @@ OSL_RSOP OSL_HOSTDEVICE bool
 rs_trace_get(OSL::OpaqueExecContextPtr ec, OSL::ustringhash name,
              OSL::TypeDesc type, void* val, bool derivatives)
 {
-#ifndef __CUDA_ARCH__
+#if !OSL_GPU_DEVICE_COMPILE
     auto sg = (OSL::ShaderGlobals*)ec;
     return sg->renderer->getmessage(sg, OSL::Strings::trace, name, type, val,
                                     derivatives);
@@ -564,7 +570,7 @@ rs_get_attribute(OSL::OpaqueExecContextPtr oec, OSL::ustringhash_pod object_,
         && type == OSL::TypeFloat)
         return rs_get_attribute_constant_float(3.14159f, derivatives, result);
 
-#ifndef __CUDA_ARCH__
+#if !OSL_GPU_DEVICE_COMPILE
     if (object.empty()) {
         // TODO: implement a true free function version of rs_get_userdata
         // that only uses data from RenderState.  Because that isn't done
@@ -660,7 +666,7 @@ rs_get_interpolated_test(void* val)
     return true;
 }
 
-#ifndef __CUDACC__
+#if !OSL_GPU_DEVICE_COMPILE
 OSL_RSOP OSL_HOSTDEVICE void
 rs_errorfmt(OSL::OpaqueExecContextPtr ec, OSL::ustringhash fmt_specification,
             int32_t arg_count, const OSL::EncodedType* argTypes,
@@ -716,4 +722,31 @@ rs_filefmt(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename_hash,
                       filename_hash, fmt_specification, arg_count, argTypes,
                       argValuesSize, argValues);
 }
-#endif  // #ifndef __CUDACC__
+#elif !defined(__CUDA_ARCH__)
+// On an AMDGPU device the messages are dropped for now: OSL/journal.h is
+// host only, and testrender does not run shaders on AMD GPUs yet, so no
+// host would read them. (On CUDA, cuda/rend_lib.cu defines these.)
+OSL_RSOP OSL_HOSTDEVICE void
+rs_errorfmt(OSL::OpaqueExecContextPtr, OSL::ustringhash, int32_t,
+            const OSL::EncodedType*, uint32_t, uint8_t*)
+{
+}
+
+OSL_RSOP OSL_HOSTDEVICE void
+rs_warningfmt(OSL::OpaqueExecContextPtr, OSL::ustringhash, int32_t,
+              const OSL::EncodedType*, uint32_t, uint8_t*)
+{
+}
+
+OSL_RSOP OSL_HOSTDEVICE void
+rs_printfmt(OSL::OpaqueExecContextPtr, OSL::ustringhash, int32_t,
+            const OSL::EncodedType*, uint32_t, uint8_t*)
+{
+}
+
+OSL_RSOP OSL_HOSTDEVICE void
+rs_filefmt(OSL::OpaqueExecContextPtr, OSL::ustringhash, OSL::ustringhash,
+           int32_t, const OSL::EncodedType*, uint32_t, uint8_t*)
+{
+}
+#endif
