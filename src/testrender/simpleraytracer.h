@@ -99,6 +99,8 @@ public:
     MaterialVec& shaders() { return m_shaders; }
 
     OIIO::ErrorHandler& errhandler() const { return *m_errhandler; }
+    // Has an error been reported through errhandler()?
+    bool had_error() const { return m_had_error; }
 
     const std::vector<bool>& shader_is_light() { return m_shader_is_light; }
     const std::vector<unsigned>& lightprims() { return m_lightprims; }
