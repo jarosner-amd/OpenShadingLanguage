@@ -38,6 +38,7 @@
 #    include "optixgridrender.h"
 #endif
 
+#include "amdgpu_artifacts.h"
 #include "render_state.h"
 #include "simplerend.h"
 
@@ -2023,80 +2024,10 @@ emit_amdgpu(SimpleRenderer* rend)
 
     ustring group_name;
     shadingsys->getattribute(shadergroup.get(), "groupname", group_name);
-    std::string stem = group_name.string();
-    for (char& c : stem) {
-        if (!(std::isalnum((unsigned char)c) || c == '.' || c == '-'))
-            c = '_';
-    }
-
-    for (int i = 0; i < num_artifacts; ++i) {
-        std::string prefix = OSL::fmtformat("gpu_artifact:{}:", i);
-        ustring arch, triple;
-        int kind = 0, num_exports = 0, size = 0;
-        bool got = shadingsys->getattribute(shadergroup.get(), prefix + "arch",
-                                            TypeString, &arch)
-                   && shadingsys->getattribute(shadergroup.get(),
-                                               prefix + "triple", TypeString,
-                                               &triple)
-                   && shadingsys->getattribute(shadergroup.get(),
-                                               prefix + "kind", kind)
-                   && shadingsys->getattribute(shadergroup.get(),
-                                               prefix + "num_exports",
-                                               num_exports)
-                   && shadingsys->getattribute(shadergroup.get(),
-                                               prefix + "size", size);
-        if (!got) {
-            std::cerr << "ERROR: Could not query AMDGPU artifact " << i << "\n";
-            ok = false;
-            continue;
-        }
-        const bool is_ir = (kind == int(GPUArtifactKind::LLVMIR));
-        OSL::print(
-            "AMDGPU artifact {}: arch={} triple={} format={} exports={}\n", i,
-            arch.empty() ? ustring("generic") : arch, triple,
-            is_ir ? "llvmir" : "bitcode", num_exports);
-        for (int m = 0; m < num_exports; ++m) {
-            std::string eprefix = OSL::fmtformat("{}export:{}:", prefix, m);
-            ustring ekind, elayer, esymbol;
-            if (!shadingsys->getattribute(shadergroup.get(), eprefix + "kind",
-                                          TypeString, &ekind)
-                || !shadingsys->getattribute(shadergroup.get(),
-                                             eprefix + "layer", TypeString,
-                                             &elayer)
-                || !shadingsys->getattribute(shadergroup.get(),
-                                             eprefix + "symbol", TypeString,
-                                             &esymbol)) {
-                std::cerr << "ERROR: Could not query export " << m
-                          << " of AMDGPU artifact " << i << "\n";
-                ok = false;
-                continue;
-            }
-            OSL::print("  export {}: kind={} layer={} symbol={}\n", m, ekind,
-                       elayer.empty() ? ustring("-") : elayer, esymbol);
-        }
-
-        if (!save_amdgpu)
-            continue;
-        std::vector<unsigned char> data(size_t(size > 0 ? size : 0));
-        if (!shadingsys->getattribute(shadergroup.get(), prefix + "data",
-                                      TypeDesc(TypeDesc::UINT8, int(size)),
-                                      data.data())) {
-            std::cerr << "ERROR: Could not read the data of AMDGPU artifact "
-                      << i << "\n";
-            ok = false;
-            continue;
-        }
-        std::string filename = OSL::fmtformat("amdgpu_{}_{}.{}", stem,
-                                              arch.empty() ? "generic"
-                                                           : arch.string(),
-                                              is_ir ? "ll" : "bc");
-        if (!OIIO::Filesystem::write_binary_file(filename, data)) {
-            std::cerr << "ERROR: Could not write " << filename << "\n";
-            ok = false;
-            continue;
-        }
-        OSL::print("Wrote {}\n", filename);
-    }
+    int reported = 0;
+    if (!report_amdgpu_artifacts(*shadingsys, *shadergroup, group_name,
+                                 save_amdgpu, reported))
+        ok = false;
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
