@@ -1,0 +1,2 @@
+# Excluded from C++-backend testing: the shaders are compiled for and run on
+# an AMD GPU.

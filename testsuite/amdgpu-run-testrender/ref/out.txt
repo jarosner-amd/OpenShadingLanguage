@@ -1,0 +1,5 @@
+Compiled emitter.osl -> emitter.oso
+Compiled matte.osl -> matte.oso
+Compiled metal.osl -> metal.oso
+Computing diff of "cpu.exr" vs "gpu.exr"
+PASS
