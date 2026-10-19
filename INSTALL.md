@@ -226,6 +226,10 @@ To build the shadeops in, configure with:
 * `ROCM_PATH` (default: the `ROCM_PATH` environment variable at the first
   configure) is the ROCm installation with the HIP headers and device
   libraries.
+* OpenImageIO must have HIP device support (see the dependencies above).
+  With an OpenImageIO release, which does not have it yet, compiling the
+  device shadeops fails with errors such as "reference to `__host__`
+  function 'fast_sin' in `__device__` function".
 
 Built in: the math, noise and spline shadeops, matrices and named spaces,
 color functions, the printf, error and warning shims, the texture, trace and
