@@ -10,6 +10,7 @@
 
 #include <OpenImageIO/imagebuf.h>
 
+#include "test_common/render_state.h"
 #include <OSL/oslexec.h>
 #include <OSL/rendererservices.h>
 #include "background.h"
@@ -96,6 +97,10 @@ public:
     // of the same kind on this thread.
     virtual bool execute_group(ShadingContext& ctx, ShaderGroup& group,
                                ShaderGlobals& sg, ShadeKind kind);
+
+    // The camera as the free-function renderer services read it
+    // (rs_simplerend.cpp), for a renderer that runs them on a device.
+    void fill_render_context(RenderContext& rc) const;
 
     void prepare_lights();
     void prepare_geometry();

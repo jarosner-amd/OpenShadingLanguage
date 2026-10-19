@@ -1228,6 +1228,26 @@ SimpleRaytracer::execute_group(ShadingContext& ctx, ShaderGroup& group,
 
 
 void
+SimpleRaytracer::fill_render_context(RenderContext& rc) const
+{
+    rc.xres            = camera.xres;
+    rc.yres            = camera.yres;
+    rc.world_to_camera = m_world_to_camera;
+    rc.projection      = m_projection;
+    rc.pixelaspect     = m_pixelaspect;
+    for (int i = 0; i < 4; ++i)
+        rc.screen_window[i] = m_screen_window[i];
+    rc.shutter[0]     = m_shutter[0];
+    rc.shutter[1]     = m_shutter[1];
+    rc.fov            = m_fov;
+    rc.hither         = m_hither;
+    rc.yon            = m_yon;
+    rc.journal_buffer = nullptr;
+}
+
+
+
+void
 SimpleRaytracer::prepare_render()
 {
     // Retrieve and validate options
