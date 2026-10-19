@@ -588,6 +588,17 @@ macro (osl_add_all_tests)
                                   OSL_TESTRENDER_RS_DIR=${CMAKE_BINARY_DIR}/src/testrender)
                 endif ()
             endforeach ()
+            # Renders on an AMD GPU, so only on request. testrender loads
+            # hiprtc from the ROCm installation (HIP_PATH).
+            if (OSL_TEST_AMDGPU_RUN)
+                TESTSUITE ( amdgpu-run-testrender )
+                foreach (_t amdgpu-run-testrender amdgpu-run-testrender.opt)
+                    if (TEST ${_t})
+                        set_property (TEST ${_t} APPEND PROPERTY ENVIRONMENT
+                                      HIP_PATH=${ROCM_PATH})
+                    endif ()
+                endforeach ()
+            endif ()
         endif ()
     endif ()
 

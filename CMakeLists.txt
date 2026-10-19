@@ -124,6 +124,7 @@ set (OPTIX_EXTRA_LIBS CACHE STRING "Extra lib targets needed for OptiX")
 set (CUDA_EXTRA_LIBS CACHE STRING "Extra lib targets needed for CUDA")
 set (CUDA_TARGET_ARCH "sm_60" CACHE STRING "CUDA GPU architecture (e.g. sm_50)")
 option (OSL_ENABLE_AMDGPU "Embed AMDGPU device shadeops (needs USE_LLVM_BITCODE and the ROCm device libraries)" OFF)
+option (OSL_TEST_AMDGPU_RUN "Also run the tests that render on an AMD GPU (needs OSL_ENABLE_AMDGPU and a local AMD GPU)" OFF)
 set (OSL_HIP_TARGET_ARCHS "gfx1100;gfx1201" CACHE STRING
      "AMDGPU architectures to build device shadeops for")
 set (ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH
