@@ -184,9 +184,23 @@ without rendering (no output image is needed or written):
 
 It writes one `amdgpu_<material>_<group>_<arch>.bc` per shader group. With
 `OSL_ENABLE_AMDGPU`, testrender's build also compiles its own renderer
-services (the `rs_*` functions) for each architecture, to
-`rs_simplerend_amdgpu_<arch>.bc` in its build folder. On the GPU they do
-not look up textures yet, and they drop errors and prints.
+services (the `rs_*` functions) for each architecture and embeds them.
+
+In such a build, `testrender --amdgpu-run` (or the environment variable
+`TESTRENDER_AMDGPU=1`) renders a scene with every shader run on an AMD GPU:
+
+    testrender --amdgpu-run -r 64 64 scene.xml out.exr
+
+testrender then uses the first AMD GPU whose architecture is in
+`OSL_HIP_TARGET_ARCHS`. It loads the HIP runtime and hiprtc only at that
+point (from `HIP_PATH` or `PATH`, or the libraries named by
+`OSL_HIP_RUNTIME_LIBRARY` and `OSL_HIPRTC_LIBRARY`), so testrender builds
+and runs without them otherwise. The CPU still traces the rays and
+evaluates the closures; each shader execution is one small GPU launch, so
+this is slow. On the GPU, testrender's renderer services do not look up
+textures yet (lookups report a missing texture), and they drop errors and
+prints. The test `amdgpu-run-testrender` compares such a render with the
+CPU's; it needs an AMD GPU, so it only runs with `-DOSL_TEST_AMDGPU_RUN=ON`.
 
 This needs LLVM 19 or newer with the AMDGPU target, and one of two builds:
 
