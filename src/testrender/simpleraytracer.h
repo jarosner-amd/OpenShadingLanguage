@@ -86,6 +86,17 @@ public:
 
     virtual void parse_scene_xml(const std::string& scenefile);
     virtual void prepare_render();
+
+    // What a shader group is run for, in execute_group.
+    enum class ShadeKind { Background, Surface, Light, Displacement };
+    // Run a shader group at one shading point; the result is in sg (Ci,
+    // and P for displacement). The CPU renderer runs it with the
+    // ShadingSystem. A renderer may run it elsewhere, for example on a
+    // GPU; the closures in sg.Ci must then stay valid until the next call
+    // of the same kind on this thread.
+    virtual bool execute_group(ShadingContext& ctx, ShaderGroup& group,
+                               ShaderGlobals& sg, ShadeKind kind);
+
     void prepare_lights();
     void prepare_geometry();
     virtual void warmup() {}
