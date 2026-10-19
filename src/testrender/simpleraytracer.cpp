@@ -1238,7 +1238,9 @@ SimpleRaytracer::prepare_render()
         auto evaler = [this](const Dual2<Vec3>& dir, ShadingContext* ctx) {
             return this->eval_background(dir, ctx);
         };
-        background.prepare(backgroundResolution, evaler, ctx);
+        // A black background has nothing to sample: evaluate it directly.
+        if (!background.prepare(backgroundResolution, evaler, ctx))
+            backgroundResolution = 0;
 
         // release context
         shadingsys->release_context(ctx);
