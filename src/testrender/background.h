@@ -49,7 +49,10 @@ struct Background {
 #endif
     }
 
-    template<typename F, typename T> void prepare(int resolution, F cb, T* data)
+    // Build the importance table. Returns false, and the table must not be
+    // used, if the background has no energy at all (it is black
+    // everywhere), so there is nothing to sample.
+    template<typename F, typename T> bool prepare(int resolution, F cb, T* data)
     {
         // These values are set via set_variables() in CUDA
         res = resolution;
@@ -74,6 +77,10 @@ struct Background {
                 for (int x = 0; x < res; x++)
                     cols[i - res + x] /= cols[i - 1];
         }
+        // A black background: normalizing would divide by zero and leave
+        // NaN in the table, and sampling it would index out of range.
+        if (!(rows[res - 1] > 0))
+            return false;
         // normalize the pdf across all scanlines
         for (int y = 0; y < res; y++) {
             rows[y] /= rows[res - 1];
@@ -96,6 +103,7 @@ struct Background {
             out->write_image(TypeFloat, &values[0]);
         delete out;
 #endif
+        return true;
     }
 
     OSL_HOSTDEVICE
