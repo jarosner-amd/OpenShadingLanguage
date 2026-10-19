@@ -1,0 +1,2 @@
+# Excluded from batched testing: testrender --amdgpu-run renders on an AMD GPU
+# and does not run batched shaders.
