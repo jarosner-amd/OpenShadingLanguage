@@ -945,7 +945,8 @@ SimpleRaytracer::eval_background(const Dual2<Vec3>& dir, ShadingContext* ctx,
     if (bounce >= 0)
         sg.raytype = bounce > 0 ? Ray::DIFFUSE : Ray::CAMERA;
 #ifndef __CUDACC__
-    shadingsys->execute(*ctx, *m_shaders[backgroundShaderID].surf, sg);
+    execute_group(*ctx, *m_shaders[backgroundShaderID].surf, sg,
+                  ShadeKind::Background);
 #else
     StackClosurePool closure_pool;
     execute_shader(sg, render_params.bg_id, closure_pool);
@@ -1031,7 +1032,7 @@ SimpleRaytracer::subpixel_radiance(float x, float y, Sampler& sampler,
             break;  // no shader attached? done
 
         // execute shader and process the resulting list of closures
-        shadingsys->execute(*ctx, *m_shaders[shaderID].surf, sg);
+        execute_group(*ctx, *m_shaders[shaderID].surf, sg, ShadeKind::Surface);
 #else
         if (shaderID < 0)
             break;  // no shader attached? done
@@ -1144,8 +1145,8 @@ SimpleRaytracer::subpixel_radiance(float x, float y, Sampler& sampler,
                                          sample.u, sample.v);
 #ifndef __CUDACC__
                         // execute the light shader (for emissive closures only)
-                        shadingsys->execute(*ctx, *m_shaders[shaderID].surf,
-                                            light_sg);
+                        execute_group(*ctx, *m_shaders[shaderID].surf, light_sg,
+                                      ShadeKind::Light);
 #else
                         execute_shader(light_sg, shaderID, light_closure_pool);
 #endif
@@ -1217,6 +1218,15 @@ SimpleRaytracer::antialias_pixel(int x, int y, ShadingContext* ctx)
 
 
 #ifndef __CUDACC__
+bool
+SimpleRaytracer::execute_group(ShadingContext& ctx, ShaderGroup& group,
+                               ShaderGlobals& sg, ShadeKind /*kind*/)
+{
+    return shadingsys->execute(ctx, group, sg);
+}
+
+
+
 void
 SimpleRaytracer::prepare_render()
 {
@@ -1373,7 +1383,8 @@ SimpleRaytracer::prepare_geometry()
                 sg.I             = (p[i] - camera.eye).normalize();
                 sg.surfacearea   = area;
 
-                shadingsys->execute(*ctx, *m_shaders[shaderID].disp, sg);
+                execute_group(*ctx, *m_shaders[shaderID].disp, sg,
+                              ShadeKind::Displacement);
 
                 p[i] = sg.P;
             }
