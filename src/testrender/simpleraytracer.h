@@ -97,6 +97,10 @@ public:
     virtual bool execute_group(ShadingContext& ctx, ShaderGroup& group,
                                ShaderGlobals& sg, ShadeKind kind);
 
+    // The camera as the free-function renderer services read it
+    // (rs_simplerend.cpp), for a renderer that runs them on a device.
+    void fill_render_context(RenderContext& rc) const;
+
     void prepare_lights();
     void prepare_geometry();
     virtual void warmup() {}

@@ -65,7 +65,10 @@ static bool use_optix              = OIIO::Strutil::stoi(
 static bool use_amdgpu = false;  // compile for AMDGPU, emit artifacts only
 static std::vector<std::string> amdgpu_archs;
 static std::string amdgpu_format;  // "", "bitcode" or "llvmir"
-static bool save_amdgpu                 = false;
+static bool save_amdgpu = false;
+// Render with every shader run on an AMD GPU (implies use_amdgpu).
+static bool amdgpu_run = OIIO::Strutil::stoi(
+    OIIO::Sysutil::getenv("TESTRENDER_AMDGPU"));
 static bool optix_no_inline             = false;
 static bool optix_no_inline_layer_funcs = false;
 static bool optix_no_merge_layer_funcs  = false;
@@ -183,6 +186,8 @@ getargs(int argc, const char* argv[])
       .help("AMDGPU architecture to compile for, e.g. gfx1100 (repeatable; default: one generic artifact, which a build with the device shadeops rejects)");
     ap.arg("--amdgpu-format %s:FORMAT", &amdgpu_format)
       .help("AMDGPU artifact format: bitcode (default) or llvmir");
+    ap.arg("--amdgpu-run", &amdgpu_run)
+      .help("Render, running every shader on an AMD GPU (also set by the TESTRENDER_AMDGPU environment variable)");
     ap.arg("--save-amdgpu", &save_amdgpu)
       .help("Write each AMDGPU artifact to a file named amdgpu_<material>_<group>_<arch>.<bc|ll>");
     ap.arg("--debug", &debug1)
@@ -267,6 +272,12 @@ getargs(int argc, const char* argv[])
         std::cerr << "testrender: " << message << "\n";
         exit(EXIT_FAILURE);
     };
+    if (amdgpu_run) {
+        if (amdgpu_archs.size() || amdgpu_format == "llvmir")
+            bad_options(
+                "--amdgpu-run takes the architecture from the GPU and needs bitcode: no --amdgpu-arch, no --amdgpu-format llvmir.");
+        use_amdgpu = true;
+    }
     if (!use_amdgpu
         && (amdgpu_archs.size() || amdgpu_format.size() || save_amdgpu))
         bad_options(
@@ -284,7 +295,7 @@ getargs(int argc, const char* argv[])
         ap.print_help();
         exit(EXIT_FAILURE);
     }
-    if (imagefile.empty() && !use_amdgpu) {
+    if (imagefile.empty() && (!use_amdgpu || amdgpu_run)) {
         std::cerr << "testrender: Must specify a filename for output render\n\n";
         ap.print_help();
         exit(EXIT_FAILURE);
@@ -333,6 +344,16 @@ main(int argc, const char* argv[])
         hiprend = new HipRaytracer;
         hiprend->save_artifacts(save_amdgpu);
         rend = hiprend;
+        if (amdgpu_run) {
+            // The GPU decides the architecture, before any group compiles.
+            std::string error;
+            std::string arch = hiprend->run(error);
+            if (arch.empty()) {
+                std::cerr << "testrender: --amdgpu-run: " << error << "\n";
+                return EXIT_FAILURE;
+            }
+            amdgpu_archs = { arch };
+        }
     }
 #if OSL_USE_OPTIX
     else if (use_optix)
@@ -384,7 +405,7 @@ main(int argc, const char* argv[])
 
     rend->prepare_render();
 
-    if (hiprend) {
+    if (hiprend && !hiprend->running()) {
         // Compiled for AMDGPU only: there is nothing to render.
         bool ok = hiprend->ok() && !hiprend->had_error();
         rend->clear();
@@ -474,9 +495,12 @@ main(int argc, const char* argv[])
         }
     }
 
+    // A GPU render that failed may still have written an image.
+    bool ok = !hiprend || hiprend->ok();
+
     // We're done with the shading system now, destroy it
     rend->clear();
     delete shadingsys;
     delete rend;
-    return EXIT_SUCCESS;
+    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

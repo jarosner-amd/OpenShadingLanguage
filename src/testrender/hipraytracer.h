@@ -4,35 +4,78 @@
 
 #pragma once
 
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 #include "simpleraytracer.h"
 
 OSL_NAMESPACE_BEGIN
 
-// The AMDGPU side of testrender, for now without a GPU runtime: it compiles
-// every shader group of the scene for AMDGPU (the ShadingSystem must have
-// gpu_backend "amdgpu") and reports, and optionally saves, the artifacts.
-// Nothing is launched and no image is made.
+class HipRuntime;
+
+// The AMDGPU side of testrender. Without run(), it compiles every shader
+// group of the scene for AMDGPU (the ShadingSystem must have gpu_backend
+// "amdgpu") and reports, and optionally saves, the artifacts; nothing is
+// launched. With run() (needs a build with OSL_ENABLE_AMDGPU), the scene
+// renders as on the CPU, but every shader runs on an AMD GPU: one launch
+// per shading call, the closures copied back for the CPU to evaluate.
 class HipRaytracer final : public SimpleRaytracer {
 public:
-    HipRaytracer() = default;
+    HipRaytracer();
+    ~HipRaytracer() override;
 
     // Write each artifact to amdgpu_<material>_<group>_<arch>.bc or .ll.
     void save_artifacts(bool save) { m_save = save; }
 
-    // Compile the scene's shader groups; does not run any shader.
-    void prepare_render() override;
-    // No GPU launch yet: these do nothing.
-    void warmup() override {}
-    void render(int xres, int yres) override {}
+    // Render on the GPU. Loads the HIP runtime and picks the first AMD GPU
+    // whose architecture this build has renderer services for; returns
+    // that architecture (for gpu_archs), or an empty string on failure,
+    // with the reason in `error`.
+    std::string run(std::string& error);
 
-    // False if a group failed to compile or produced no artifact.
+    // Compile the scene's shader groups. With run(), also make a GPU code
+    // object for each, then prepare the scene as SimpleRaytracer does
+    // (which runs shaders, through execute_group).
+    void prepare_render() override;
+    void warmup() override {}
+    void render(int xres, int yres) override;
+
+    bool execute_group(ShadingContext& ctx, ShaderGroup& group,
+                       ShaderGlobals& sg, ShadeKind kind) override;
+
+    // GPU memory for OSL's interactive parameters.
+    void* device_alloc(size_t size) override;
+    void device_free(void* ptr) override;
+    void* copy_to_device(void* dst_device, const void* src_host,
+                         size_t size) override;
+
+    // False if a group failed to compile or produced no artifact, or the
+    // GPU failed.
     bool ok() const { return m_ok; }
+    bool running() const { return m_run; }
 
 private:
+    struct GpuGroup;
+    struct Device;
+
     bool compile_group(ShaderGroup& group, string_view stem);
+    bool build_module(ShaderGroup& group, const std::vector<char>& artifact,
+                      const std::string& fused);
+    bool relocate_closures(std::vector<char>& pool, const char* device_base,
+                           ClosureColor*& ci);
+    bool fail(string_view message);
 
     bool m_save = false;
     bool m_ok   = true;
+    bool m_run  = false;
+    std::string m_arch;
+    std::unique_ptr<HipRuntime> m_hip;
+    std::unique_ptr<Device> m_dev;
+    std::unordered_map<const ShaderGroup*, std::unique_ptr<GpuGroup>> m_groups;
+    std::mutex m_mutex;  // one GPU shading call at a time
 };
 
 OSL_NAMESPACE_END
