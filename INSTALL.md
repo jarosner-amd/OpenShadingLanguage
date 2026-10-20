@@ -197,10 +197,17 @@ point (from `HIP_PATH` or `PATH`, or the libraries named by
 `OSL_HIP_RUNTIME_LIBRARY` and `OSL_HIPRTC_LIBRARY`), so testrender builds
 and runs without them otherwise. The CPU still traces the rays and
 evaluates the closures; each shader execution is one small GPU launch, so
-this is slow. On the GPU, testrender's renderer services do not look up
-textures yet (lookups report a missing texture), and they drop errors and
-prints. The test `amdgpu-run-testrender` compares such a render with the
-CPU's; it needs an AMD GPU, so it only runs with `-DOSL_TEST_AMDGPU_RUN=ON`.
+this is slow. `texture()` lookups use GPU textures, made from each file
+when a shader group is compiled, with mip levels added when the file has
+none. They filter like the GPU's texture units, not like OpenImageIO's
+texture system, so textured renders are close to the CPU's but not
+identical, and the texture options (wrap modes, blur, `firstchannel`,
+`missingcolor` and so on) are ignored, as with OptiX. `environment()` uses
+the same GPU textures as lat-long maps, oriented as OpenImageIO orients
+them. `texture3d()` reports a missing texture, and errors and prints are
+dropped.
+The test `amdgpu-run-testrender` compares such renders with the CPU's; it
+needs an AMD GPU, so it only runs with `-DOSL_TEST_AMDGPU_RUN=ON`.
 
 This needs LLVM 19 or newer with the AMDGPU target, and one of two builds:
 
