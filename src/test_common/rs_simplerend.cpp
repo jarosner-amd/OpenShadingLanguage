@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
 
+#if defined(__HIP_DEVICE_COMPILE__)
+// tex2DGrad and hipTextureObject_t, for the AMDGPU texture lookup.
+#    include <hip/hip_runtime.h>
+#endif
+
 #include <OpenImageIO/fmath.h>
 
 #include <OSL/oslconfig.h>
@@ -234,8 +239,19 @@ rs_texture(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename,
         result[c] = ((const float*)&fromTexture)[c];
     return true;
 #else
-    // No device textures on AMDGPU yet: as for a missing texture.
-    return false;
+    // AMDGPU: the handle is a GpuTexture (see testrender's
+    // HipRaytracer::get_texture_handle). Without one, as for a missing
+    // texture.
+    if (!texture_handle)
+        return false;
+    const auto* tex = reinterpret_cast<const GpuTexture*>(texture_handle);
+    const float4 fromTexture
+        = tex2DGrad<float4>(reinterpret_cast<hipTextureObject_t>(tex->object),
+                            s, t, make_float2(dsdx, dtdx),
+                            make_float2(dsdy, dtdy));
+    for (int c = 0; c < nchannels; ++c)
+        result[c] = ((const float*)&fromTexture)[c];
+    return true;
 #endif
 }
 
@@ -275,8 +291,45 @@ rs_environment(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename,
                                      texture_thread_info, options, sg, R, dRdx,
                                      dRdy, nchannels, result, dresultds,
                                      dresultdt, errormessage);
-#else
+#elif defined(__CUDA_ARCH__)
     return false;
+#else
+    // AMDGPU: a lat-long map, looked up as OpenImageIO does
+    // (vector_to_latlong in its environment.cpp), with the footprint of
+    // R + dRdx and R + dRdy as derivatives.
+    if (!texture_handle)
+        return false;
+    const auto* tex = reinterpret_cast<const GpuTexture*>(texture_handle);
+    auto latlong    = [tex](OSL::Vec3 d, float& s, float& t) {
+        d.normalize();
+        if (tex->y_up) {
+            s = atan2f(-d.x, d.z) / float(2 * M_PI) + 0.5f;
+            t = 0.5f - atan2f(d.y, hypotf(d.z, -d.x)) / float(M_PI);
+        } else {
+            s = atan2f(d.y, d.x) / float(2 * M_PI) + 0.5f;
+            t = 0.5f - atan2f(d.z, hypotf(d.x, d.y)) / float(M_PI);
+        }
+        if (isnan(s))
+            s = 0.0f;
+        if (isnan(t))
+            t = 0.0f;
+    };
+    float s, t, sx, tx, sy, ty;
+    latlong(R, s, t);
+    latlong(R + dRdx, sx, tx);
+    latlong(R + dRdy, sy, ty);
+    // s wraps around, so take the short way between two directions.
+    auto wrapped = [](float ds) { return ds - floorf(ds + 0.5f); };
+    // t does not wrap: stay half a texel away from the poles.
+    const float half = 0.5f / float(tex->height);
+    const float tc   = fminf(fmaxf(t, half), 1.0f - half);
+    const float4 fromTexture
+        = tex2DGrad<float4>(reinterpret_cast<hipTextureObject_t>(tex->object),
+                            s, tc, make_float2(wrapped(sx - s), tx - t),
+                            make_float2(wrapped(sy - s), ty - t));
+    for (int c = 0; c < nchannels; ++c)
+        result[c] = ((const float*)&fromTexture)[c];
+    return true;
 #endif
 }
 

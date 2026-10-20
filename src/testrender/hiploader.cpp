@@ -35,6 +35,14 @@ struct HipRuntime::Api {
     decltype(&::hipModuleGetFunction) ModuleGetFunction      = nullptr;
     decltype(&::hipModuleLaunchKernel) ModuleLaunchKernel    = nullptr;
 
+    // Textures.
+    decltype(&::hipMallocMipmappedArray) MallocMipmappedArray     = nullptr;
+    decltype(&::hipFreeMipmappedArray) FreeMipmappedArray         = nullptr;
+    decltype(&::hipGetMipmappedArrayLevel) GetMipmappedArrayLevel = nullptr;
+    decltype(&::hipMemcpy2DToArray) Memcpy2DToArray               = nullptr;
+    decltype(&::hipCreateTextureObject) CreateTextureObject       = nullptr;
+    decltype(&::hipDestroyTextureObject) DestroyTextureObject     = nullptr;
+
     decltype(&::hiprtcCreateProgram) CreateProgram         = nullptr;
     decltype(&::hiprtcCompileProgram) CompileProgram       = nullptr;
     decltype(&::hiprtcGetProgramLogSize) GetProgramLogSize = nullptr;
@@ -187,6 +195,12 @@ HipRuntime::load()
               && get(rtc, "hiprtcLinkAddData", a.LinkAddData, e)
               && get(rtc, "hiprtcLinkComplete", a.LinkComplete, e)
               && get(rtc, "hiprtcLinkDestroy", a.LinkDestroy, e);
+    ok = ok && get(hip, "hipMallocMipmappedArray", a.MallocMipmappedArray, e)
+         && get(hip, "hipFreeMipmappedArray", a.FreeMipmappedArray, e)
+         && get(hip, "hipGetMipmappedArrayLevel", a.GetMipmappedArrayLevel, e)
+         && get(hip, "hipMemcpy2DToArray", a.Memcpy2DToArray, e)
+         && get(hip, "hipCreateTextureObject", a.CreateTextureObject, e)
+         && get(hip, "hipDestroyTextureObject", a.DestroyTextureObject, e);
     if (ok)
         m_api = std::move(api);
     return ok;
@@ -366,6 +380,70 @@ HipRuntime::launch_one(void* kernel, void** args)
                                            1, 0, nullptr, args, nullptr),
                  "hipModuleLaunchKernel")
            && check(m_api->DeviceSynchronize(), "hipDeviceSynchronize");
+}
+
+
+
+void*
+HipRuntime::create_texture(const std::vector<TextureLevel>& levels)
+{
+    if (levels.empty()) {
+        m_error = "a texture needs at least one level";
+        return nullptr;
+    }
+    hipChannelFormatDesc channels = { 32, 32, 32, 32,
+                                      hipChannelFormatKindFloat };
+    hipMipmappedArray_t mipmaps   = nullptr;
+    if (!check(m_api->MallocMipmappedArray(&mipmaps, &channels,
+                                           make_hipExtent(levels[0].width,
+                                                          levels[0].height, 0),
+                                           unsigned(levels.size()), 0),
+               "hipMallocMipmappedArray"))
+        return nullptr;
+    for (size_t l = 0; l < levels.size(); ++l) {
+        const TextureLevel& level = levels[l];
+        hipArray_t array          = nullptr;
+        size_t pitch              = size_t(level.width) * 4 * sizeof(float);
+        if (!check(m_api->GetMipmappedArrayLevel(&array, mipmaps, unsigned(l)),
+                   "hipGetMipmappedArrayLevel")
+            || !check(m_api->Memcpy2DToArray(array, 0, 0, level.rgba.data(),
+                                             pitch, pitch, size_t(level.height),
+                                             hipMemcpyHostToDevice),
+                      "hipMemcpy2DToArray")) {
+            m_api->FreeMipmappedArray(mipmaps);
+            return nullptr;
+        }
+    }
+    hipResourceDesc resource   = {};
+    resource.resType           = hipResourceTypeMipmappedArray;
+    resource.res.mipmap.mipmap = mipmaps;
+    hipTextureDesc desc        = {};
+    desc.addressMode[0]        = hipAddressModeWrap;
+    desc.addressMode[1]        = hipAddressModeWrap;
+    desc.filterMode            = hipFilterModeLinear;
+    desc.readMode              = hipReadModeElementType;
+    desc.normalizedCoords      = 1;
+    // Not 1, unlike CUDA: the HIP runtime on Windows rejects every texture
+    // with "operation not supported" when maxAnisotropy is 1.
+    desc.maxAnisotropy         = 0;
+    desc.mipmapFilterMode      = hipFilterModeLinear;
+    desc.maxMipmapLevelClamp   = float(levels.size() - 1);
+    hipTextureObject_t texture = nullptr;
+    if (!check(m_api->CreateTextureObject(&texture, &resource, &desc, nullptr),
+               "hipCreateTextureObject")) {
+        m_api->FreeMipmappedArray(mipmaps);
+        return nullptr;
+    }
+    // The mip-mapped array stays allocated as long as the process: the
+    // texture object does not own it.
+    return texture;
+}
+
+void
+HipRuntime::destroy_texture(void* texture)
+{
+    if (texture)
+        m_api->DestroyTextureObject(hipTextureObject_t(texture));
 }
 
 OSL_NAMESPACE_END
