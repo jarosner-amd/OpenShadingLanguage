@@ -22,6 +22,11 @@ wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key \
     | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
 echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} ${ROCM_DISTRO} main" \
     | sudo tee /etc/apt/sources.list.d/rocm.list
+# Ubuntu has its own, older HIP packages (hipcc, libamdhip64-dev, ...) with
+# higher version numbers than AMD's. Without this pin apt mixes them in, and
+# their headers in /usr/include/hip shadow the ROCm ones.
+printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' \
+    | sudo tee /etc/apt/preferences.d/rocm-pin-600
 time sudo apt-get update -q
 time sudo apt-get install -y --no-install-recommends rocm-device-libs hip-dev
 
@@ -29,3 +34,7 @@ time sudo apt-get install -y --no-install-recommends rocm-device-libs hip-dev
 # library or header is easy to trace.
 dpkg -L rocm-device-libs | grep "/ocml.bc$"
 ls -d /opt/rocm*/include/hip
+if [ -e /usr/include/hip ] ; then
+    echo "Unexpected HIP headers in /usr/include/hip (not from ROCm)"
+    exit 1
+fi
