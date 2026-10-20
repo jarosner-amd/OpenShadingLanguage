@@ -1,0 +1,10 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// The background as a lat-long environment map, looked up with environment().
+shader latlong(float Kb = 1, string filename = "")
+{
+    color c = environment(filename, I);
+    Ci = Kb * c * background();
+}
