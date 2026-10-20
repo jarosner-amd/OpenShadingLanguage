@@ -46,6 +46,13 @@ public:
     bool execute_group(ShadingContext& ctx, ShaderGroup& group,
                        ShaderGlobals& sg, ShadeKind kind) override;
 
+    // With run(): a GPU texture for the file (made once, kept until the end),
+    // or null if it cannot be read, which the device treats as a missing
+    // texture. Otherwise as SimpleRaytracer.
+    using SimpleRaytracer::get_texture_handle;
+    TextureHandle* get_texture_handle(ustring filename, ShadingContext* context,
+                                      const TextureOpt* options) override;
+
     // GPU memory for OSL's interactive parameters.
     void* device_alloc(size_t size) override;
     void device_free(void* ptr) override;
@@ -67,6 +74,7 @@ private:
     bool relocate_closures(std::vector<char>& pool, const char* device_base,
                            ClosureColor*& ci);
     bool fail(string_view message);
+    void* load_texture(ustring filename, void*& object);
 
     bool m_save = false;
     bool m_ok   = true;
@@ -76,6 +84,9 @@ private:
     std::unique_ptr<Device> m_dev;
     std::unordered_map<const ShaderGroup*, std::unique_ptr<GpuGroup>> m_groups;
     std::mutex m_mutex;  // one GPU shading call at a time
+    // Per file: the device GpuTexture (the handle) and its texture object.
+    std::unordered_map<ustring, std::pair<void*, void*>> m_textures;
+    std::mutex m_textures_mutex;
 };
 
 OSL_NAMESPACE_END

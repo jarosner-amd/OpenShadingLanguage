@@ -51,6 +51,17 @@ public:
     // Run a kernel with one thread and wait for it.
     bool launch_one(void* kernel, void** args);
 
+    // One mip level of a texture: width x height texels of 4 floats.
+    struct TextureLevel {
+        int width = 0, height = 0;
+        std::vector<float> rgba;
+    };
+    // Make a mip-mapped texture object (wrapping, linear filtering) from
+    // the levels, finest first. Returns the hipTextureObject_t as a
+    // pointer, or null on failure.
+    void* create_texture(const std::vector<TextureLevel>& levels);
+    void destroy_texture(void* texture);
+
 private:
     struct Api;
     std::unique_ptr<Api> m_api;

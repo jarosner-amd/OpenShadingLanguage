@@ -57,3 +57,11 @@ struct RenderState {
     RenderContext* context;
     StackClosurePool* closure_pool;
 };
+
+// A texture on an AMD GPU, as testrender --amdgpu-run passes it to the
+// renderer services as the texture handle.
+struct GpuTexture {
+    void* object;  // the hipTextureObject_t
+    int y_up;      // as a lat-long environment map: +y up (else +z)?
+    int height;    // texels in t at the finest mip level
+};

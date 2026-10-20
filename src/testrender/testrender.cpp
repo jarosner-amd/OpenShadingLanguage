@@ -136,8 +136,10 @@ set_shadingsys_options()
             shadingsys->attribute("gpu_artifact_kind", amdgpu_format);
         // The texture handles are pointers into this process. They mean
         // nothing on a GPU, and they would make the artifact differ from
-        // run to run.
-        shadingsys->attribute("opt_texture_handle", 0);
+        // run to run. When rendering on the GPU they are GPU textures,
+        // made for this run, as with OptiX.
+        if (!amdgpu_run)
+            shadingsys->attribute("opt_texture_handle", 0);
     }
     if (extraoptions.size())
         shadingsys->attribute("options", extraoptions);
