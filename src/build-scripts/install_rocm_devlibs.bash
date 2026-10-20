@@ -12,7 +12,8 @@
 set -ex
 
 # The device libraries are bitcode, so OSL's LLVM must be able to read them:
-# pick a ROCm whose LLVM is not newer than OSL's (ROCm 7.0 uses LLVM 20).
+# pick a ROCm whose LLVM is not newer than OSL's (ROCm 6.4 uses LLVM 19,
+# ROCm 7.0 and 7.1 use LLVM 20, ROCm 7.2 uses LLVM 22).
 ROCM_VERSION=${ROCM_VERSION:=7.0.2}
 ROCM_DISTRO=${ROCM_DISTRO:=$(. /etc/os-release && echo $VERSION_CODENAME)}
 
