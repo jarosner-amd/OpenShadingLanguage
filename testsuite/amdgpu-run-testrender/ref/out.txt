@@ -1,5 +1,13 @@
+Compiled checkerboard.osl -> checkerboard.oso
 Compiled emitter.osl -> emitter.oso
+Compiled envmap.osl -> envmap.oso
+Compiled latlong.osl -> latlong.oso
 Compiled matte.osl -> matte.oso
 Compiled metal.osl -> metal.oso
-Computing diff of "cpu.exr" vs "gpu.exr"
+Compiled ward.osl -> ward.oso
+Computing diff of "cpu_cornell.exr" vs "gpu_cornell.exr"
+PASS
+Computing diff of "cpu_regions.exr" vs "gpu_regions.exr"
+PASS
+Computing diff of "cpu_env_regions.exr" vs "gpu_env_regions.exr"
 PASS
