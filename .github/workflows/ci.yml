@@ -695,7 +695,8 @@ jobs:
           # with the ROCm device libraries and linked into each artifact.
           # The device libraries are bitcode, so OSL's LLVM must be at least
           # as new as the LLVM that ROCm built them with: ROCm 6.4 uses LLVM
-          # 19, ROCm 7.0 and 7.1 use LLVM 20, ROCm 7.2 uses LLVM 22.
+          # 19, ROCm 7.0 and 7.1 use LLVM 20, ROCm 7.2 uses LLVM 22, ROCm 7.14
+          # uses LLVM 23. ROCm 7.2's HIP headers do not compile with clang 23.
           # They need OpenImageIO's HIP device support (HIP device macros and
           # HIP fast-math functions), which is not in an OpenImageIO release
           # yet, so OpenImageIO comes from a branch that has it.
@@ -802,8 +803,8 @@ jobs:
                             PTEX_VERSION=v2.4.3
                             PUGIXML_VERSION=v1.16
                             FREETYPE_VERSION=VER-2-14-3
-          - desc: AMDGPU device shadeops gcc14/C++17 llvm23 rocm7.2
-            nametag: linux-amdgpu-rocm7.2-llvm23
+          - desc: AMDGPU device shadeops gcc14/C++17 llvm23 rocm7.14
+            nametag: linux-amdgpu-rocm7.14-llvm23
             runner: ubuntu-24.04
             cc_compiler: gcc-14
             cxx_compiler: g++-14
@@ -821,8 +822,8 @@ jobs:
                             OPENIMAGEIO_REPO=jarosner-amd/OpenImageIO
                             LLVM_APT_VERSION=23
                             LLVM_ROOT=/usr/lib/llvm-23
-                            ROCM_VERSION=7.2.4
-                            ROCM_PATH=/opt/rocm
+                            ROCM_VERSION=7.14.1
+                            ROCM_PATH=/opt/rocm/core-7.14
                             LIBTIFF_VERSION=v4.7.1
                             PTEX_VERSION=v2.4.3
                             PUGIXML_VERSION=v1.16
