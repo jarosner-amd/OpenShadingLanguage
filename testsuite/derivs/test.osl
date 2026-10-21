@@ -337,7 +337,7 @@ test ()
        vector n = normalize(a);
        printf ("\n");
        printf ("normalize: n = normalize(%.4g) = %.4g  Dx(n) = %.4g  Dy(n) = %.4g\n",
-             a, n, Dx(n), Dy(n));
+             a, pretty(n), pretty(Dx(n)), pretty(Dy(n)));
     }
 
     {
