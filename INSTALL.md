@@ -197,7 +197,11 @@ point (from `HIP_PATH` or `PATH`, or the libraries named by
 `OSL_HIP_RUNTIME_LIBRARY` and `OSL_HIPRTC_LIBRARY`), so testrender builds
 and runs without them otherwise. The CPU still traces the rays and
 evaluates the closures; each shader execution is one small GPU launch, so
-this is slow. `texture()` lookups use GPU textures, made from each file
+this is slow: about 250 microseconds per shader execution, almost all of it
+the latency of the round trip to the GPU (a 64x64 image with 2 samples per
+pixel takes about 35 seconds). Shading many points per launch would be much
+faster, but needs a change to testrender's path tracer, so it is not done.
+`texture()` lookups use GPU textures, made from each file
 when a shader group is compiled, with mip levels added when the file has
 none. They filter like the GPU's texture units, not like OpenImageIO's
 texture system, so textured renders are close to the CPU's but not

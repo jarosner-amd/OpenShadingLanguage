@@ -34,23 +34,37 @@ struct HipRaytracer::GpuGroup {
     void* interactive     = nullptr;  // device copy, owned by the group
 };
 
-// The device memory of one shading call, reused by every call.
+// The device memory of shading calls, reused by every call.
 struct HipRaytracer::Device {
-    char* sg              = nullptr;  // ShaderGlobals
-    char* state           = nullptr;  // RenderState
-    char* context         = nullptr;  // RenderContext
-    char* pool            = nullptr;  // StackClosurePool
-    char* groupdata       = nullptr;
-    size_t groupdata_size = 0;
-    char* uniform         = nullptr;  // the shading-state block
-    char* xforms          = nullptr;  // identity, shader2common, object2common
-    // The pool as reset() leaves it, with its pointer at the device buffer.
-    std::vector<char> pool_image;
+    char* state   = nullptr;  // RenderState
+    char* context = nullptr;  // RenderContext
+    char* uniform = nullptr;  // the shading-state block
+    // The call block (see below) and its copy on the host.
+    char* block       = nullptr;
+    size_t block_size = 0;
+    std::vector<char> staging;
 };
 
 // StackClosurePool is its 1024-byte buffer, then the next free address.
 static_assert(sizeof(StackClosurePool) == 1024 + sizeof(void*),
               "StackClosurePool layout changed");
+
+// Everything a shading call sends to the GPU or reads back is in one device
+// buffer, the call block, so that a call is one copy in, one launch and one
+// copy out: each blocking HIP call costs 50 to 70 us. In order: the
+// ShaderGlobals, the closure pool, three transforms (identity, shader2common,
+// object2common), then the group data. The first two come back.
+static constexpr size_t
+round_up(size_t n, size_t alignment)
+{
+    return (n + alignment - 1) / alignment * alignment;
+}
+static constexpr size_t k_globals_offset = 0;
+static constexpr size_t k_pool_offset    = round_up(sizeof(ShaderGlobals), 64);
+static constexpr size_t k_xforms_offset
+    = round_up(k_pool_offset + sizeof(StackClosurePool), 64);
+static constexpr size_t k_groupdata_offset
+    = round_up(k_xforms_offset + 3 * sizeof(Matrix44), 256);
 
 #else
 
@@ -77,8 +91,7 @@ HipRaytracer::~HipRaytracer()
             m_hip->unload_module(g.second->module);
         if (m_dev)
             for (char* p :
-                 { m_dev->sg, m_dev->state, m_dev->context, m_dev->pool,
-                   m_dev->groupdata, m_dev->uniform, m_dev->xforms })
+                 { m_dev->state, m_dev->context, m_dev->uniform, m_dev->block })
                 m_hip->free(p);
     }
 #endif
@@ -548,75 +561,86 @@ HipRaytracer::execute_group(ShadingContext& ctx, ShaderGroup& group,
             return fail("no shading_state_uniform from the ShadingSystem");
         m_dev     = std::make_unique<Device>();
         Device& d = *m_dev;
-        d.sg      = (char*)hip.alloc(sizeof(ShaderGlobals));
         d.state   = (char*)hip.alloc(sizeof(RenderState));
         d.context = (char*)hip.alloc(sizeof(RenderContext));
-        d.pool    = (char*)hip.alloc(sizeof(StackClosurePool));
-        d.xforms  = (char*)hip.alloc(3 * sizeof(Matrix44));
         d.uniform = (char*)hip.alloc(size_t(size));
         RenderContext rc {};
         fill_render_context(rc);
-        RenderState rs { reinterpret_cast<RenderContext*>(d.context),
-                         reinterpret_cast<StackClosurePool*>(d.pool) };
-        Matrix44 identity;
-        identity.makeIdentity();
-        if (!d.sg || !d.state || !d.context || !d.pool || !d.xforms
-            || !d.uniform || !hip.to_device(d.context, &rc, sizeof(rc))
-            || !hip.to_device(d.state, &rs, sizeof(rs))
-            || !hip.to_device(d.xforms, &identity, sizeof(identity))
+        if (!d.state || !d.context || !d.uniform
+            || !hip.to_device(d.context, &rc, sizeof(rc))
             || !hip.to_device(d.uniform, block, size_t(size)))
             return fail(hip.error());
-        d.pool_image.assign(sizeof(StackClosurePool), 0);
-        void* next = d.pool;
-        std::memcpy(d.pool_image.data() + 1024, &next, sizeof(next));
     }
-    Device& d = *m_dev;
-    if (g.groupdata_size > d.groupdata_size) {
-        hip.free(d.groupdata);
-        d.groupdata = (char*)hip.alloc(g.groupdata_size);
-        if (!d.groupdata)
+    Device& d           = *m_dev;
+    const size_t needed = k_groupdata_offset + g.groupdata_size;
+    if (needed > d.block_size) {
+        // A larger group than any before: a new call block. Nothing in it
+        // outlives a call, but the render state points at its closure pool.
+        hip.free(d.block);
+        d.block      = nullptr;
+        d.block_size = 0;
+        d.block      = (char*)hip.alloc(needed);
+        if (!d.block)
             return fail(hip.error());
-        d.groupdata_size = g.groupdata_size;
+        d.block_size = needed;
+        d.staging.assign(needed, 0);
+        RenderState rs { reinterpret_cast<RenderContext*>(d.context),
+                         reinterpret_cast<StackClosurePool*>(d.block
+                                                             + k_pool_offset) };
+        if (!hip.to_device(d.state, &rs, sizeof(rs)))
+            return fail(hip.error());
     }
 
     // The globals with device pointers. Transforms that are null mean
     // identity, as in SimpleRaytracer::get_matrix.
-    ShaderGlobals dsg            = sg;
-    dsg.renderstate              = d.state;
-    dsg.tracedata                = nullptr;
-    dsg.objdata                  = nullptr;
-    dsg.context                  = nullptr;
-    dsg.renderer                 = nullptr;
-    dsg.shadingStateUniform      = d.uniform;
-    dsg.Ci                       = nullptr;
+    char* const stage       = d.staging.data();
+    ShaderGlobals dsg       = sg;
+    dsg.renderstate         = d.state;
+    dsg.tracedata           = nullptr;
+    dsg.objdata             = nullptr;
+    dsg.context             = nullptr;
+    dsg.renderer            = nullptr;
+    dsg.shadingStateUniform = d.uniform;
+    dsg.Ci                  = nullptr;
+    Matrix44 identity;
+    identity.makeIdentity();
+    std::memcpy(stage + k_xforms_offset, &identity, sizeof(Matrix44));
     TransformationPtr host_xf[2] = { sg.shader2common, sg.object2common };
     TransformationPtr dev_xf[2];
     for (int i = 0; i < 2; ++i) {
-        char* slot = d.xforms + (i + 1) * sizeof(Matrix44);
-        if (host_xf[i] && !hip.to_device(slot, host_xf[i], sizeof(Matrix44)))
-            return fail(hip.error());
-        dev_xf[i] = TransformationPtr(host_xf[i] ? slot : d.xforms);
+        const size_t slot = k_xforms_offset + (i + 1) * sizeof(Matrix44);
+        if (host_xf[i])
+            std::memcpy(stage + slot, host_xf[i], sizeof(Matrix44));
+        dev_xf[i] = TransformationPtr(d.block
+                                      + (host_xf[i] ? slot : k_xforms_offset));
     }
     dsg.shader2common = dev_xf[0];
     dsg.object2common = dev_xf[1];
+    std::memcpy(stage + k_globals_offset, &dsg, sizeof(dsg));
+    // The pool as reset() leaves it: zeros, and its pointer at its buffer.
+    std::memset(stage + k_pool_offset, 0, sizeof(StackClosurePool));
+    void* next = d.block + k_pool_offset;
+    std::memcpy(stage + k_pool_offset + 1024, &next, sizeof(next));
+    if (g.groupdata_size)
+        std::memset(stage + k_groupdata_offset, 0, g.groupdata_size);
+    void* globals     = d.block + k_globals_offset;
+    void* groupdata   = d.block + k_groupdata_offset;
     void* interactive = g.interactive;
-    void* args[]      = { &d.sg, &d.groupdata, &interactive };
-    if (!hip.to_device(d.sg, &dsg, sizeof(dsg))
-        || !hip.to_device(d.pool, d.pool_image.data(), d.pool_image.size())
-        || (g.groupdata_size && !hip.fill(d.groupdata, 0, g.groupdata_size))
-        || !hip.launch_one(g.kernel, args))
+    void* args[]      = { &globals, &groupdata, &interactive };
+    if (!hip.to_device(d.block, stage, needed)
+        || !hip.launch_one(g.kernel, args)
+        || !hip.to_host(stage, d.block, k_xforms_offset))
         return fail(hip.error());
 
     // Back: the globals (displacement moves P) and the closures, which
     // stay valid in this thread's buffer for this kind until its next call.
     thread_local std::vector<char> closures[4];
     std::vector<char>& pool = closures[int(kind)];
-    pool.resize(sizeof(StackClosurePool));
-    if (!hip.to_host(&dsg, d.sg, sizeof(dsg))
-        || !hip.to_host(pool.data(), d.pool, pool.size()))
-        return fail(hip.error());
+    pool.assign(stage + k_pool_offset,
+                stage + k_pool_offset + sizeof(StackClosurePool));
+    std::memcpy(&dsg, stage + k_globals_offset, sizeof(dsg));
     ClosureColor* ci = dsg.Ci;
-    if (!relocate_closures(pool, d.pool, ci))
+    if (!relocate_closures(pool, d.block + k_pool_offset, ci))
         return fail("a closure points outside the GPU closure memory");
 
     ShaderGlobals host     = sg;
