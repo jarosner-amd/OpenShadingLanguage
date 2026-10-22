@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <unordered_map>
@@ -96,6 +97,13 @@ public:
     // of the same kind on this thread.
     virtual bool execute_group(ShadingContext& ctx, ShaderGroup& group,
                                ShaderGlobals& sg, ShadeKind kind);
+    // Run a shader group at n independent shading points, then call
+    // done(i, sgs[i]) for each, while its closures are still valid. A
+    // renderer that runs shaders on a GPU can do this in one launch.
+    virtual bool
+    execute_group_batch(ShadingContext& ctx, ShaderGroup& group,
+                        ShaderGlobals* sgs, int n, ShadeKind kind,
+                        const std::function<void(int, ShaderGlobals&)>& done);
 
     // The camera as the free-function renderer services read it
     // (rs_simplerend.cpp), for a renderer that runs them on a device.
@@ -211,6 +219,9 @@ private:
                           const Dual2<float>& t, int id, float u, float v);
     Vec3 eval_background(const Dual2<Vec3>& dir, ShadingContext* ctx,
                          int bounce = -1);
+    // The same for n directions at once (the importance table).
+    void eval_background_batch(const Dual2<Vec3>* dirs, Vec3* out, int n,
+                               ShadingContext* ctx);
     Color3 subpixel_radiance(float x, float y, Sampler& sampler,
                              ShadingContext* ctx);
     Color3 antialias_pixel(int x, int y, ShadingContext* ctx);

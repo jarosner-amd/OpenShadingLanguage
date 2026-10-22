@@ -45,6 +45,12 @@ public:
 
     bool execute_group(ShadingContext& ctx, ShaderGroup& group,
                        ShaderGlobals& sg, ShadeKind kind) override;
+    // One launch with a thread per point, for the independent calls of the
+    // background's importance table.
+    bool execute_group_batch(
+        ShadingContext& ctx, ShaderGroup& group, ShaderGlobals* sgs, int n,
+        ShadeKind kind,
+        const std::function<void(int, ShaderGlobals&)>& done) override;
 
     // With run(): a GPU texture for the file (made once, kept until the end),
     // or null if it cannot be read, which the device treats as a missing
@@ -71,8 +77,9 @@ private:
     bool compile_group(ShaderGroup& group, string_view stem);
     bool build_module(ShaderGroup& group, const std::vector<char>& artifact,
                       const std::string& fused);
-    bool relocate_closures(std::vector<char>& pool, const char* device_base,
+    bool relocate_closures(char* pool, const char* device_base,
                            ClosureColor*& ci);
+    bool init_device();
     bool fail(string_view message);
     // A texture on the GPU: the device GpuTexture (the handle OSL passes
     // on) and the two texture objects it refers to.

@@ -30,6 +30,7 @@ OSL_NAMESPACE_BEGIN
 struct HipRaytracer::GpuGroup {
     void* module          = nullptr;
     void* kernel          = nullptr;
+    void* batch_kernel    = nullptr;  // one thread per shading point
     size_t groupdata_size = 0;
     void* interactive     = nullptr;  // device copy, owned by the group
 };
@@ -43,6 +44,10 @@ struct HipRaytracer::Device {
     char* block       = nullptr;
     size_t block_size = 0;
     std::vector<char> staging;
+    // The same for a batch of independent points (execute_group_batch).
+    char* batch       = nullptr;
+    size_t batch_size = 0;
+    std::vector<char> batch_staging;
 };
 
 // StackClosurePool is its 1024-byte buffer, then the next free address.
@@ -91,8 +96,8 @@ HipRaytracer::~HipRaytracer()
         for (auto& g : m_groups)
             m_hip->unload_module(g.second->module);
         if (m_dev)
-            for (char* p :
-                 { m_dev->state, m_dev->context, m_dev->uniform, m_dev->block })
+            for (char* p : { m_dev->state, m_dev->context, m_dev->uniform,
+                             m_dev->block, m_dev->batch })
                 m_hip->free(p);
     }
 #endif
@@ -206,9 +211,23 @@ HipRaytracer::build_module(ShaderGroup&, const std::vector<char>&,
 }
 
 bool
-HipRaytracer::relocate_closures(std::vector<char>&, const char*, ClosureColor*&)
+HipRaytracer::relocate_closures(char*, const char*, ClosureColor*&)
 {
     return false;
+}
+
+bool
+HipRaytracer::init_device()
+{
+    return false;
+}
+
+bool
+HipRaytracer::execute_group_batch(
+    ShadingContext& ctx, ShaderGroup& group, ShaderGlobals* sgs, int n,
+    ShadeKind kind, const std::function<void(int, ShaderGlobals&)>& done)
+{
+    return SimpleRaytracer::execute_group_batch(ctx, group, sgs, n, kind, done);
 }
 
 bool
@@ -297,7 +316,16 @@ HipRaytracer::build_module(ShaderGroup& group,
         "void*);\n"
         "extern \"C\" __global__ void osl_testrender_shade(void* sg, "
         "void* gd, void* ip)\n"
-        "{{\n    {0}(sg, gd, nullptr, nullptr, 0, ip);\n}}\n",
+        "{{\n    {0}(sg, gd, nullptr, nullptr, 0, ip);\n}}\n"
+        "extern \"C\" __global__ void osl_testrender_shade_batch(char* sgs, "
+        "unsigned long long sg_stride, char* gds, "
+        "unsigned long long gd_stride, void* ip, int n)\n"
+        "{{\n"
+        "    int i = blockIdx.x * blockDim.x + threadIdx.x;\n"
+        "    if (i < n)\n"
+        "        {0}(sgs + i * sg_stride, gds + i * gd_stride, nullptr, "
+        "nullptr, 0, ip);\n"
+        "}}\n",
         fused);
     std::vector<char> kernel, code;
     if (!m_hip->compile(source, "osl_testrender_shade.hip", m_arch, kernel)
@@ -308,9 +336,12 @@ HipRaytracer::build_module(ShaderGroup& group,
         return fail(m_hip->error());
     auto g    = std::make_unique<GpuGroup>();
     g->module = m_hip->load_module(code);
-    if (g->module)
-        g->kernel = m_hip->kernel(g->module, "osl_testrender_shade");
-    if (!g->kernel) {
+    if (g->module) {
+        g->kernel       = m_hip->kernel(g->module, "osl_testrender_shade");
+        g->batch_kernel = m_hip->kernel(g->module,
+                                        "osl_testrender_shade_batch");
+    }
+    if (!g->kernel || !g->batch_kernel) {
         m_hip->unload_module(g->module);
         return fail(m_hip->error());
     }
@@ -476,8 +507,8 @@ HipRaytracer::copy_to_device(void* dst_device, const void* src_host,
 // The closures came back as a copy of the device closure pool. Point their
 // links (add and mul children, closure-typed parameters) into the copy.
 bool
-HipRaytracer::relocate_closures(std::vector<char>& pool,
-                                const char* device_base, ClosureColor*& ci)
+HipRaytracer::relocate_closures(char* pool, const char* device_base,
+                                ClosureColor*& ci)
 {
     const size_t used = sizeof(StackClosurePool) - sizeof(void*);
     auto to_host      = [&](const void* p, ClosureColor*& out) {
@@ -487,7 +518,7 @@ HipRaytracer::relocate_closures(std::vector<char>& pool,
         const char* d = static_cast<const char*>(p);
         if (d < device_base || d + sizeof(ClosureColor) > device_base + used)
             return false;
-        out = reinterpret_cast<ClosureColor*>(pool.data() + (d - device_base));
+        out = reinterpret_cast<ClosureColor*>(pool + (d - device_base));
         return true;
     };
     std::vector<ClosureColor*> todo;
@@ -557,28 +588,8 @@ HipRaytracer::execute_group(ShadingContext& ctx, ShaderGroup& group,
     const GpuGroup& g = *found->second;
     HipRuntime& hip   = *m_hip;
 
-    if (!m_dev) {
-        // First call: the device memory every call reuses.
-        void* block    = nullptr;
-        long long size = 0;
-        if (!shadingsys->getattribute("shading_state_uniform", TypeDesc::PTR,
-                                      &block)
-            || !shadingsys->getattribute("shading_state_uniform:size",
-                                         TypeDesc::LONGLONG, &size)
-            || !block || size <= 0)
-            return fail("no shading_state_uniform from the ShadingSystem");
-        m_dev     = std::make_unique<Device>();
-        Device& d = *m_dev;
-        d.state   = (char*)hip.alloc(sizeof(RenderState));
-        d.context = (char*)hip.alloc(sizeof(RenderContext));
-        d.uniform = (char*)hip.alloc(size_t(size));
-        RenderContext rc {};
-        fill_render_context(rc);
-        if (!d.state || !d.context || !d.uniform
-            || !hip.to_device(d.context, &rc, sizeof(rc))
-            || !hip.to_device(d.uniform, block, size_t(size)))
-            return fail(hip.error());
-    }
+    if (!init_device())
+        return false;
     Device& d           = *m_dev;
     const size_t needed = k_groupdata_offset + g.groupdata_size;
     if (needed > d.block_size) {
@@ -648,7 +659,7 @@ HipRaytracer::execute_group(ShadingContext& ctx, ShaderGroup& group,
                 stage + k_pool_offset + sizeof(StackClosurePool));
     std::memcpy(&dsg, stage + k_globals_offset, sizeof(dsg));
     ClosureColor* ci = dsg.Ci;
-    if (!relocate_closures(pool, d.block + k_pool_offset, ci))
+    if (!relocate_closures(pool.data(), d.block + k_pool_offset, ci))
         return fail("a closure points outside the GPU closure memory");
 
     ShaderGlobals host     = sg;
@@ -662,6 +673,159 @@ HipRaytracer::execute_group(ShadingContext& ctx, ShaderGroup& group,
     sg.shader2common       = host.shader2common;
     sg.object2common       = host.object2common;
     sg.Ci                  = ci;
+    return true;
+}
+
+
+
+// The device memory every call reuses, made at the first call.
+bool
+HipRaytracer::init_device()
+{
+    if (m_dev)
+        return true;
+    HipRuntime& hip = *m_hip;
+    void* block     = nullptr;
+    long long size  = 0;
+    if (!shadingsys->getattribute("shading_state_uniform", TypeDesc::PTR, &block)
+        || !shadingsys->getattribute("shading_state_uniform:size",
+                                     TypeDesc::LONGLONG, &size)
+        || !block || size <= 0)
+        return fail("no shading_state_uniform from the ShadingSystem");
+    auto dev     = std::make_unique<Device>();
+    dev->state   = (char*)hip.alloc(sizeof(RenderState));
+    dev->context = (char*)hip.alloc(sizeof(RenderContext));
+    dev->uniform = (char*)hip.alloc(size_t(size));
+    RenderContext rc {};
+    fill_render_context(rc);
+    m_dev = std::move(dev);
+    if (!m_dev->state || !m_dev->context || !m_dev->uniform
+        || !hip.to_device(m_dev->context, &rc, sizeof(rc))
+        || !hip.to_device(m_dev->uniform, block, size_t(size)))
+        return fail(hip.error());
+    return true;
+}
+
+
+
+// n independent points in one launch, a thread each. The device block holds
+// the identity matrix, then for every point its ShaderGlobals, closure pool,
+// RenderState, two transforms and group data. The globals and the pools come
+// back, and each point's closures are relocated into its copy of the pool.
+bool
+HipRaytracer::execute_group_batch(
+    ShadingContext& ctx, ShaderGroup& group, ShaderGlobals* sgs, int n,
+    ShadeKind kind, const std::function<void(int, ShaderGlobals&)>& done)
+{
+    if (!m_run || n <= 0)
+        return SimpleRaytracer::execute_group_batch(ctx, group, sgs, n, kind,
+                                                    done);
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_ok)
+        return false;
+    auto found = m_groups.find(&group);
+    if (found == m_groups.end())
+        return fail("a shader group has no GPU code object");
+    const GpuGroup& g = *found->second;
+    HipRuntime& hip   = *m_hip;
+    if (!init_device())
+        return false;
+    Device& d = *m_dev;
+
+    const size_t count        = size_t(n);
+    const size_t sg_stride    = round_up(sizeof(ShaderGlobals), 64);
+    const size_t pool_stride  = round_up(sizeof(StackClosurePool), 64);
+    const size_t state_stride = round_up(sizeof(RenderState), 16);
+    const size_t xform_stride = 2 * sizeof(Matrix44);
+    const size_t gd_stride    = round_up(g.groupdata_size, 64);
+    const size_t off_sgs      = 64;
+    const size_t off_pools    = off_sgs + count * sg_stride;
+    const size_t off_states   = off_pools + count * pool_stride;
+    const size_t off_xforms   = off_states + count * state_stride;
+    const size_t off_gds      = round_up(off_xforms + count * xform_stride, 64);
+    const size_t total        = off_gds + count * gd_stride;
+    if (total > d.batch_size) {
+        hip.free(d.batch);
+        d.batch      = nullptr;
+        d.batch_size = 0;
+        d.batch      = (char*)hip.alloc(total);
+        if (!d.batch)
+            return fail(hip.error());
+        d.batch_size = total;
+        d.batch_staging.assign(total, 0);
+    }
+    char* const stage = d.batch_staging.data();
+    Matrix44 identity;
+    identity.makeIdentity();
+    std::memcpy(stage, &identity, sizeof(identity));
+    for (size_t i = 0; i < count; ++i) {
+        const size_t pool_at         = off_pools + i * pool_stride;
+        const size_t state_at        = off_states + i * state_stride;
+        const size_t xform_at        = off_xforms + i * xform_stride;
+        ShaderGlobals dsg            = sgs[i];
+        dsg.renderstate              = d.batch + state_at;
+        dsg.tracedata                = nullptr;
+        dsg.objdata                  = nullptr;
+        dsg.context                  = nullptr;
+        dsg.renderer                 = nullptr;
+        dsg.shadingStateUniform      = d.uniform;
+        dsg.Ci                       = nullptr;
+        TransformationPtr host_xf[2] = { sgs[i].shader2common,
+                                         sgs[i].object2common };
+        TransformationPtr dev_xf[2];
+        for (int k = 0; k < 2; ++k) {
+            const size_t slot = xform_at + size_t(k) * sizeof(Matrix44);
+            if (host_xf[k])
+                std::memcpy(stage + slot, host_xf[k], sizeof(Matrix44));
+            dev_xf[k] = TransformationPtr(d.batch + (host_xf[k] ? slot : 0));
+        }
+        dsg.shader2common = dev_xf[0];
+        dsg.object2common = dev_xf[1];
+        std::memcpy(stage + off_sgs + i * sg_stride, &dsg, sizeof(dsg));
+        RenderState rs { reinterpret_cast<RenderContext*>(d.context),
+                         reinterpret_cast<StackClosurePool*>(d.batch
+                                                             + pool_at) };
+        std::memcpy(stage + state_at, &rs, sizeof(rs));
+        std::memset(stage + pool_at, 0, sizeof(StackClosurePool));
+        void* next = d.batch + pool_at;
+        std::memcpy(stage + pool_at + 1024, &next, sizeof(next));
+        if (g.groupdata_size)
+            std::memset(stage + off_gds + i * gd_stride, 0, g.groupdata_size);
+    }
+    void* kernel_sgs          = d.batch + off_sgs;
+    void* kernel_gds          = d.batch + off_gds;
+    unsigned long long sg_str = sg_stride;
+    unsigned long long gd_str = gd_stride;
+    void* interactive         = g.interactive;
+    int kernel_n              = n;
+    void* args[]              = { &kernel_sgs, &sg_str,      &kernel_gds,
+                                  &gd_str,     &interactive, &kernel_n };
+    if (!hip.to_device(d.batch, stage, total)
+        || !hip.launch(g.batch_kernel, unsigned((count + 63) / 64), 64, args)
+        || !hip.to_host(stage + off_sgs, d.batch + off_sgs,
+                        off_states - off_sgs))
+        return fail(hip.error());
+
+    for (size_t i = 0; i < count; ++i) {
+        ShaderGlobals dsg;
+        std::memcpy(&dsg, stage + off_sgs + i * sg_stride, sizeof(dsg));
+        const size_t pool_at = off_pools + i * pool_stride;
+        ClosureColor* ci     = dsg.Ci;
+        if (!relocate_closures(stage + pool_at, d.batch + pool_at, ci))
+            return fail("a closure points outside the GPU closure memory");
+        const ShaderGlobals host   = sgs[i];
+        sgs[i]                     = dsg;
+        sgs[i].renderstate         = host.renderstate;
+        sgs[i].tracedata           = host.tracedata;
+        sgs[i].objdata             = host.objdata;
+        sgs[i].context             = host.context;
+        sgs[i].renderer            = host.renderer;
+        sgs[i].shadingStateUniform = host.shadingStateUniform;
+        sgs[i].shader2common       = host.shader2common;
+        sgs[i].object2common       = host.object2common;
+        sgs[i].Ci                  = ci;
+        done(int(i), sgs[i]);
+    }
     return true;
 }
 
