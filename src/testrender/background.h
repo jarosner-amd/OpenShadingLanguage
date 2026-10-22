@@ -7,6 +7,7 @@
 #include <OSL/dual_vec.h>
 #include <OSL/oslconfig.h>
 #include <algorithm>  // upper_bound
+#include <vector>
 
 OSL_NAMESPACE_BEGIN
 
@@ -49,7 +50,25 @@ struct Background {
 #endif
     }
 
+    // Build the importance table with a callback for one direction. This
+    // calls it once per texel, as it always did; a renderer that can do
+    // better should use prepare_rows.
     template<typename F, typename T> void prepare(int resolution, F cb, T* data)
+    {
+        prepare_rows(resolution,
+                     [&](const Dual2<Vec3>* dirs, Vec3* out, int n) {
+                         for (int i = 0; i < n; ++i)
+                             out[i] = cb(dirs[i], data);
+                     });
+    }
+
+    // Build the importance table. `rows_cb(dirs, out, n)` gives the values
+    // for n directions, one scanline of the table at a time, so that a
+    // renderer can evaluate a whole scanline at once, for example in one
+    // GPU launch. This function itself only changes the order of the work:
+    // all the directions of a scanline are made first, then evaluated by
+    // one call, then the table is updated from them.
+    template<typename R> void prepare_rows(int resolution, R rows_cb)
     {
         // These values are set via set_variables() in CUDA
         res = resolution;
@@ -61,12 +80,15 @@ struct Background {
         rows        = new float[res];
         cols        = new float[res * res];
 
+        std::vector<Dual2<Vec3>> dirs(res);
         for (int y = 0, i = 0; y < res; y++) {
+            for (int x = 0; x < res; x++)
+                dirs[x] = map(x + 0.5f, y + 0.5f);
+            rows_cb(dirs.data(), &values[y * res], res);
             for (int x = 0; x < res; x++, i++) {
-                values[i] = cb(map(x + 0.5f, y + 0.5f), data);
-                cols[i]   = std::max(std::max(values[i].x, values[i].y),
-                                     values[i].z)
-                            + ((x > 0) ? cols[i - 1] : 0.0f);
+                cols[i] = std::max(std::max(values[i].x, values[i].y),
+                                   values[i].z)
+                          + ((x > 0) ? cols[i - 1] : 0.0f);
             }
             rows[y] = cols[i - 1] + ((y > 0) ? rows[y - 1] : 0.0f);
             // normalize the pdf for this scanline (if it was non-zero)

@@ -376,8 +376,15 @@ HipRuntime::kernel(void* module, const char* name)
 bool
 HipRuntime::launch_one(void* kernel, void** args)
 {
-    return check(m_api->ModuleLaunchKernel(hipFunction_t(kernel), 1, 1, 1, 1, 1,
-                                           1, 0, nullptr, args, nullptr),
+    return launch(kernel, 1, 1, args);
+}
+
+bool
+HipRuntime::launch(void* kernel, unsigned grid_x, unsigned block_x, void** args)
+{
+    return check(m_api->ModuleLaunchKernel(hipFunction_t(kernel), grid_x, 1, 1,
+                                           block_x, 1, 1, 0, nullptr, args,
+                                           nullptr),
                  "hipModuleLaunchKernel")
            && check(m_api->DeviceSynchronize(), "hipDeviceSynchronize");
 }
