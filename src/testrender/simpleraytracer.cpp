@@ -954,6 +954,29 @@ SimpleRaytracer::eval_background(const Dual2<Vec3>& dir, ShadingContext* ctx,
     return process_background_closure((const ClosureColor*)sg.Ci);
 }
 
+
+
+#ifndef __CUDACC__
+void
+SimpleRaytracer::eval_background_batch(const Dual2<Vec3>* dirs, Vec3* out,
+                                       int n, ShadingContext* ctx)
+{
+    std::vector<ShaderGlobals> sgs(n);
+    for (int i = 0; i < n; ++i) {
+        memset((char*)&sgs[i], 0, sizeof(ShaderGlobals));
+        sgs[i].I    = dirs[i].val();
+        sgs[i].dIdx = dirs[i].dx();
+        sgs[i].dIdy = dirs[i].dy();
+    }
+    execute_group_batch(*ctx, *m_shaders[backgroundShaderID].surf, sgs.data(),
+                        n, ShadeKind::Background,
+                        [&](int i, ShaderGlobals& sg) {
+                            out[i] = process_background_closure(
+                                (const ClosureColor*)sg.Ci);
+                        });
+}
+#endif
+
 Color3
 SimpleRaytracer::subpixel_radiance(float x, float y, Sampler& sampler,
                                    ShadingContext* ctx)
@@ -1227,6 +1250,21 @@ SimpleRaytracer::execute_group(ShadingContext& ctx, ShaderGroup& group,
 
 
 
+bool
+SimpleRaytracer::execute_group_batch(
+    ShadingContext& ctx, ShaderGroup& group, ShaderGlobals* sgs, int n,
+    ShadeKind kind, const std::function<void(int, ShaderGlobals&)>& done)
+{
+    bool ok = true;
+    for (int i = 0; i < n; ++i) {
+        ok = execute_group(ctx, group, sgs[i], kind) && ok;
+        done(i, sgs[i]);
+    }
+    return ok;
+}
+
+
+
 void
 SimpleRaytracer::fill_render_context(RenderContext& rc) const
 {
@@ -1265,10 +1303,10 @@ SimpleRaytracer::prepare_render()
         ShadingContext* ctx             = shadingsys->get_context(thread_info);
 
         // build importance table to optimize background sampling
-        auto evaler = [this](const Dual2<Vec3>& dir, ShadingContext* ctx) {
-            return this->eval_background(dir, ctx);
+        auto evaler = [this, ctx](const Dual2<Vec3>* dirs, Vec3* out, int n) {
+            this->eval_background_batch(dirs, out, n, ctx);
         };
-        background.prepare(backgroundResolution, evaler, ctx);
+        background.prepare_rows(backgroundResolution, evaler);
 
         // release context
         shadingsys->release_context(ctx);
@@ -1349,6 +1387,35 @@ SimpleRaytracer::prepare_geometry()
         OSL::PerThreadInfo* thread_info = shadingsys->create_thread_info();
         ShadingContext* ctx             = shadingsys->get_context(thread_info);
 
+        // Displaced triangles wait here, with the same shader, until a
+        // batch is full, and their vertices run together. Triangles are
+        // added to disp_verts in the same order as one by one.
+        struct Pending {
+            int primID;
+            int shaderID;
+        };
+        std::vector<Pending> pending;
+        std::vector<ShaderGlobals> pending_sgs;
+        auto flush = [&]() {
+            if (pending.empty())
+                return;
+            std::vector<Vec3> displaced(pending_sgs.size());
+            execute_group_batch(*ctx, *m_shaders[pending[0].shaderID].disp,
+                                pending_sgs.data(), int(pending_sgs.size()),
+                                ShadeKind::Displacement,
+                                [&](int j, ShaderGlobals& sg) {
+                                    displaced[j] = sg.P;
+                                });
+            for (size_t t = 0; t < pending.size(); ++t) {
+                const TriangleIndices& tri = scene.triangles[pending[t].primID];
+                disp_verts[tri.a] += displaced[3 * t];
+                disp_verts[tri.b] += displaced[3 * t + 1];
+                disp_verts[tri.c] += displaced[3 * t + 2];
+            }
+            pending.clear();
+            pending_sgs.clear();
+        };
+
         bool has_smooth_normals = false;
         for (int primID = 0, nprims = scene.triangles.size(); primID < nprims;
              primID++) {
@@ -1365,6 +1432,7 @@ SimpleRaytracer::prepare_geometry()
 
             int shaderID = scene.shaderid(primID);
             if (shaderID < 0 || !m_shaders[shaderID].disp) {
+                flush();
                 disp_verts[scene.triangles[primID].a] += p[0];
                 disp_verts[scene.triangles[primID].b] += p[1];
                 disp_verts[scene.triangles[primID].c] += p[2];
@@ -1393,25 +1461,25 @@ SimpleRaytracer::prepare_geometry()
             }
 
             // displace each vertex
+            if (!pending.empty() && pending[0].shaderID != shaderID)
+                flush();
             for (int i = 0; i < 3; i++) {
-                ShaderGlobals sg = {};
-                sg.P             = p[i];
-                sg.Ng            = Ng;
-                sg.N             = n[i];
-                sg.u             = uv[i].x;
-                sg.v             = uv[i].y;
-                sg.I             = (p[i] - camera.eye).normalize();
-                sg.surfacearea   = area;
-
-                execute_group(*ctx, *m_shaders[shaderID].disp, sg,
-                              ShadeKind::Displacement);
-
-                p[i] = sg.P;
+                pending_sgs.emplace_back();
+                ShaderGlobals& sg = pending_sgs.back();
+                memset((char*)&sg, 0, sizeof(ShaderGlobals));
+                sg.P           = p[i];
+                sg.Ng          = Ng;
+                sg.N           = n[i];
+                sg.u           = uv[i].x;
+                sg.v           = uv[i].y;
+                sg.I           = (p[i] - camera.eye).normalize();
+                sg.surfacearea = area;
             }
-            disp_verts[scene.triangles[primID].a] += p[0];
-            disp_verts[scene.triangles[primID].b] += p[1];
-            disp_verts[scene.triangles[primID].c] += p[2];
+            pending.push_back({ primID, shaderID });
+            if (pending.size() >= 340)
+                flush();
         }
+        flush();
 
         // release context
         shadingsys->release_context(ctx);

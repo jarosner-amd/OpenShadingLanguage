@@ -50,6 +50,8 @@ public:
     void* kernel(void* module, const char* name);
     // Run a kernel with one thread and wait for it.
     bool launch_one(void* kernel, void** args);
+    // Run a kernel with grid_x blocks of block_x threads and wait for it.
+    bool launch(void* kernel, unsigned grid_x, unsigned block_x, void** args);
 
     // One mip level of a texture: width x height texels of 4 floats.
     struct TextureLevel {
