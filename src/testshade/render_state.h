@@ -61,7 +61,9 @@ struct RenderState {
 // A texture on an AMD GPU, as testrender --amdgpu-run passes it to the
 // renderer services as the texture handle.
 struct GpuTexture {
-    void* object;  // the hipTextureObject_t
-    int y_up;      // as a lat-long environment map: +y up (else +z)?
-    int height;    // texels in t at the finest mip level
+    void* object;      // the hipTextureObject_t, with the file's wrap modes
+    void* env_object;  // the same texels for environment(): periodic in s,
+                       // clamped in t
+    int y_up;          // as a lat-long environment map: +y up (else +z)?
+    int height;        // texels in t at the finest mip level
 };

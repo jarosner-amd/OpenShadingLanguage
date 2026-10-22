@@ -321,12 +321,12 @@ rs_environment(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename,
     // s wraps around, so take the short way between two directions.
     auto wrapped = [](float ds) { return ds - floorf(ds + 0.5f); };
     // t does not wrap: stay half a texel away from the poles.
-    const float half = 0.5f / float(tex->height);
-    const float tc   = fminf(fmaxf(t, half), 1.0f - half);
-    const float4 fromTexture
-        = tex2DGrad<float4>(reinterpret_cast<hipTextureObject_t>(tex->object),
-                            s, tc, make_float2(wrapped(sx - s), tx - t),
-                            make_float2(wrapped(sy - s), ty - t));
+    const float half         = 0.5f / float(tex->height);
+    const float tc           = fminf(fmaxf(t, half), 1.0f - half);
+    const float4 fromTexture = tex2DGrad<float4>(
+        reinterpret_cast<hipTextureObject_t>(tex->env_object), s, tc,
+        make_float2(wrapped(sx - s), tx - t),
+        make_float2(wrapped(sy - s), ty - t));
     for (int c = 0; c < nchannels; ++c)
         result[c] = ((const float*)&fromTexture)[c];
     return true;

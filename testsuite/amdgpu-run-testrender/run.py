@@ -24,6 +24,12 @@
 # must agree within 0.03 (0.01 today, 0.16 with the map upside down).
 # kitchen_probe.hdr is not used: it has black rows, for which the importance
 # table of testrender's background gives NaN, on the CPU too.
+#
+# wrap.xml shows a texture seen directly, with s and t running from about
+# -0.5 to 1.5: outside the image the CPU texture system gives black, the
+# default wrap mode of a file that names none. Averages over 8x6 regions
+# must agree within 0.01 (they differ by 0.0001 today, and by 0.4 when the
+# GPU textures repeat instead).
 
 def render(scene, size, name) :
     args = size + " " + scene
@@ -51,5 +57,15 @@ command += oiiotool("gpu_environment.exr --resize 8x6 -o gpu_env_regions.exr",
                     silent=True)
 command += oiiotool("--fail 0.03 --warn 0.03 --diff cpu_env_regions.exr"
                     + " gpu_env_regions.exr")
+command += oiiotool("-pattern checker:width=8:height=8:color1=0.8,0.8,0.8"
+                    + ":color2=0.2,0.2,0.2 64x64 3 -d half -o checker.exr",
+                    silent=True)
+command += render("wrap.xml", "-r 64 64 -aa 2", "wrap")
+command += oiiotool("cpu_wrap.exr --resize 8x6 -o cpu_wrap_regions.exr",
+                    silent=True)
+command += oiiotool("gpu_wrap.exr --resize 8x6 -o gpu_wrap_regions.exr",
+                    silent=True)
+command += oiiotool("--fail 0.01 --warn 0.01 --diff cpu_wrap_regions.exr"
+                    + " gpu_wrap_regions.exr")
 
 outputs = [ "out.txt" ]

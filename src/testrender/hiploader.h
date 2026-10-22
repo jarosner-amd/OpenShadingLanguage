@@ -56,10 +56,15 @@ public:
         int width = 0, height = 0;
         std::vector<float> rgba;
     };
-    // Make a mip-mapped texture object (wrapping, linear filtering) from
-    // the levels, finest first. Returns the hipTextureObject_t as a
-    // pointer, or null on failure.
-    void* create_texture(const std::vector<TextureLevel>& levels);
+    // Make mip-mapped texture objects (linear filtering) from the levels,
+    // finest first, as hipTextureObject_t pointers: `texture` with the wrap
+    // modes "black", "clamp", "periodic" or "mirror" (anything else is
+    // black) for s and t, and `env_texture` of the same texels for a
+    // lat-long environment map, periodic in s and clamped in t. False on
+    // failure.
+    bool create_textures(const std::vector<TextureLevel>& levels,
+                         const std::string& wrap_s, const std::string& wrap_t,
+                         void*& texture, void*& env_texture);
     void destroy_texture(void* texture);
 
 private:
