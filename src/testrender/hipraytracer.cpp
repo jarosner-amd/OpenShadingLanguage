@@ -84,8 +84,9 @@ HipRaytracer::~HipRaytracer()
 #ifdef OSL_TESTRENDER_HIP
     if (m_hip) {
         for (auto& t : m_textures) {
-            m_hip->free(t.second.first);
-            m_hip->destroy_texture(t.second.second);
+            m_hip->free(t.second.device);
+            m_hip->destroy_texture(t.second.object);
+            m_hip->destroy_texture(t.second.env_object);
         }
         for (auto& g : m_groups)
             m_hip->unload_module(g.second->module);
@@ -224,10 +225,10 @@ HipRaytracer::get_texture_handle(ustring filename, ShadingContext* context,
     return SimpleRaytracer::get_texture_handle(filename, context, options);
 }
 
-void*
-HipRaytracer::load_texture(ustring, void*&)
+HipRaytracer::TextureRecord
+HipRaytracer::load_texture(ustring)
 {
-    return nullptr;
+    return TextureRecord();
 }
 
 void*
@@ -326,11 +327,11 @@ HipRaytracer::build_module(ShaderGroup& group,
 
 // Every mip level of the file as 4 floats per texel; channels the file
 // does not have are 0, as the CPU texture system's default fill. Returns
-// the device GpuTexture, and the texture object in `object`.
-void*
-HipRaytracer::load_texture(ustring filename, void*& object)
+// the device GpuTexture and the texture objects.
+HipRaytracer::TextureRecord
+HipRaytracer::load_texture(ustring filename)
 {
-    object = nullptr;
+    TextureRecord none;
     std::vector<HipRuntime::TextureLevel> levels;
     for (int level = 0;; ++level) {
         OIIO::ImageBuf image(filename, 0, level);
@@ -349,13 +350,13 @@ HipRaytracer::load_texture(ustring filename, void*& object)
                               4 * sizeof(float))) {
             errhandler().errorfmt("Could not read {} (mip level {}): {}",
                                   filename, level, image.geterror());
-            return nullptr;
+            return none;
         }
         levels.push_back(std::move(l));
     }
     if (levels.empty()) {
         errhandler().errorfmt("Could not read {}", filename);
-        return nullptr;
+        return none;
     }
     // A file without mip levels: make them, halving with a box filter down
     // to one texel, so that a lookup with a large footprint averages over
@@ -383,42 +384,52 @@ HipRaytracer::load_texture(ustring filename, void*& object)
                 }
         levels.push_back(std::move(to));
     }
-    object = m_hip->create_texture(levels);
-    if (!object) {
+    // The wrap modes the file asks for, as the CPU texture system takes
+    // them when a lookup does not name any: black unless the file says
+    // otherwise ("wrapmodes" holds one mode, or one for s and one for t).
+    OIIO::ImageBuf top(filename);
+    top.init_spec(filename, 0, 0);
+    std::string wrap_s = "black", wrap_t = "black";
+    std::string wraps = top.spec().get_string_attribute("wrapmodes");
+    if (!wraps.empty()) {
+        size_t comma = wraps.find(',');
+        wrap_s       = wraps.substr(0, comma);
+        wrap_t = comma == std::string::npos ? wrap_s : wraps.substr(comma + 1);
+    }
+    TextureRecord rec;
+    if (!m_hip->create_textures(levels, wrap_s, wrap_t, rec.object,
+                                rec.env_object)) {
         errhandler().errorfmt("Could not make a GPU texture of {}: {}",
                               filename, m_hip->error());
-        return nullptr;
+        return none;
     }
     // What environment() needs besides the texels: which way is up, as
     // OpenImageIO decides it, and the height for clamping at the poles.
     // The texture system's default ("latlong_up", y unless set otherwise),
     // unless the file says.
     GpuTexture info;
-    info.object    = object;
-    info.y_up      = true;
-    const char* up = nullptr;
+    info.object     = rec.object;
+    info.env_object = rec.env_object;
+    info.y_up       = true;
+    const char* up  = nullptr;
     if (texturesys()->getattribute("latlong_up", OIIO::TypeString, &up) && up)
         info.y_up = (up[0] == 'y');
-    OIIO::ImageBuf top(filename);
-    if (top.init_spec(filename, 0, 0)) {
-        std::string file_up = top.spec().get_string_attribute(
-            "oiio:updirection");
-        if (file_up == "y")
-            info.y_up = true;
-        else if (file_up == "z")
-            info.y_up = false;
-    }
-    info.height  = levels[0].height;
-    void* device = m_hip->alloc(sizeof(info));
-    if (!device || !m_hip->to_device(device, &info, sizeof(info))) {
-        m_hip->free(device);
-        m_hip->destroy_texture(object);
-        object = nullptr;
+    std::string file_up = top.spec().get_string_attribute("oiio:updirection");
+    if (file_up == "y")
+        info.y_up = true;
+    else if (file_up == "z")
+        info.y_up = false;
+    info.height = levels[0].height;
+    rec.device  = m_hip->alloc(sizeof(info));
+    if (!rec.device || !m_hip->to_device(rec.device, &info, sizeof(info))) {
+        m_hip->free(rec.device);
+        m_hip->destroy_texture(rec.object);
+        m_hip->destroy_texture(rec.env_object);
         errhandler().errorfmt("Could not copy the GPU texture of {}: {}",
                               filename, m_hip->error());
-        return nullptr;
+        return none;
     }
-    return device;
+    return rec;
 }
 
 
@@ -432,12 +443,9 @@ HipRaytracer::get_texture_handle(ustring filename, ShadingContext* context,
     std::lock_guard<std::mutex> lock(m_textures_mutex);
     auto found = m_textures.find(filename);
     if (found == m_textures.end()) {
-        void* object = nullptr;
-        void* device = load_texture(filename, object);
-        found
-            = m_textures.emplace(filename, std::make_pair(device, object)).first;
+        found = m_textures.emplace(filename, load_texture(filename)).first;
     }
-    return reinterpret_cast<TextureHandle*>(found->second.first);
+    return reinterpret_cast<TextureHandle*>(found->second.device);
 }
 
 

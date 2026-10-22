@@ -206,9 +206,10 @@ when a shader group is compiled, with mip levels added when the file has
 none. They filter like the GPU's texture units, not like OpenImageIO's
 texture system, so textured renders are close to the CPU's but not
 identical, and the texture options (wrap modes, blur, `firstchannel`,
-`missingcolor` and so on) are ignored, as with OptiX. `environment()` uses
-the same GPU textures as lat-long maps, oriented as OpenImageIO orients
-them. `texture3d()` reports a missing texture, and errors and prints are
+`missingcolor` and so on) are ignored, as with OptiX. A texture wraps as its
+file says (its `wrapmodes` metadata), and black if the file says nothing, as
+the CPU texture system does. `environment()` uses the same GPU textures as
+lat-long maps, oriented as OpenImageIO orients them. `texture3d()` reports a missing texture, and errors and prints are
 dropped.
 The test `amdgpu-run-testrender` compares such renders with the CPU's; it
 needs an AMD GPU, so it only runs with `-DOSL_TEST_AMDGPU_RUN=ON`.

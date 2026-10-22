@@ -384,12 +384,29 @@ HipRuntime::launch_one(void* kernel, void** args)
 
 
 
-void*
-HipRuntime::create_texture(const std::vector<TextureLevel>& levels)
+static hipTextureAddressMode
+address_mode(const std::string& wrap)
 {
+    if (wrap == "clamp")
+        return hipAddressModeClamp;
+    if (wrap == "periodic")
+        return hipAddressModeWrap;
+    if (wrap == "mirror")
+        return hipAddressModeMirror;
+    return hipAddressModeBorder;
+}
+
+bool
+HipRuntime::create_textures(const std::vector<TextureLevel>& levels,
+                            const std::string& wrap_s,
+                            const std::string& wrap_t, void*& texture,
+                            void*& env_texture)
+{
+    texture     = nullptr;
+    env_texture = nullptr;
     if (levels.empty()) {
         m_error = "a texture needs at least one level";
-        return nullptr;
+        return false;
     }
     hipChannelFormatDesc channels = { 32, 32, 32, 32,
                                       hipChannelFormatKindFloat };
@@ -399,7 +416,7 @@ HipRuntime::create_texture(const std::vector<TextureLevel>& levels)
                                                           levels[0].height, 0),
                                            unsigned(levels.size()), 0),
                "hipMallocMipmappedArray"))
-        return nullptr;
+        return false;
     for (size_t l = 0; l < levels.size(); ++l) {
         const TextureLevel& level = levels[l];
         hipArray_t array          = nullptr;
@@ -411,32 +428,44 @@ HipRuntime::create_texture(const std::vector<TextureLevel>& levels)
                                              hipMemcpyHostToDevice),
                       "hipMemcpy2DToArray")) {
             m_api->FreeMipmappedArray(mipmaps);
-            return nullptr;
+            return false;
         }
     }
     hipResourceDesc resource   = {};
     resource.resType           = hipResourceTypeMipmappedArray;
     resource.res.mipmap.mipmap = mipmaps;
     hipTextureDesc desc        = {};
-    desc.addressMode[0]        = hipAddressModeWrap;
-    desc.addressMode[1]        = hipAddressModeWrap;
+    desc.addressMode[0]        = address_mode(wrap_s);
+    desc.addressMode[1]        = address_mode(wrap_t);
     desc.filterMode            = hipFilterModeLinear;
     desc.readMode              = hipReadModeElementType;
     desc.normalizedCoords      = 1;
     // Not 1, unlike CUDA: the HIP runtime on Windows rejects every texture
     // with "operation not supported" when maxAnisotropy is 1.
-    desc.maxAnisotropy         = 0;
-    desc.mipmapFilterMode      = hipFilterModeLinear;
-    desc.maxMipmapLevelClamp   = float(levels.size() - 1);
-    hipTextureObject_t texture = nullptr;
-    if (!check(m_api->CreateTextureObject(&texture, &resource, &desc, nullptr),
+    desc.maxAnisotropy        = 0;
+    desc.mipmapFilterMode     = hipFilterModeLinear;
+    desc.maxMipmapLevelClamp  = float(levels.size() - 1);
+    hipTextureObject_t object = nullptr;
+    if (!check(m_api->CreateTextureObject(&object, &resource, &desc, nullptr),
                "hipCreateTextureObject")) {
         m_api->FreeMipmappedArray(mipmaps);
-        return nullptr;
+        return false;
+    }
+    desc.addressMode[0]           = hipAddressModeWrap;
+    desc.addressMode[1]           = hipAddressModeClamp;
+    hipTextureObject_t env_object = nullptr;
+    if (!check(m_api->CreateTextureObject(&env_object, &resource, &desc,
+                                          nullptr),
+               "hipCreateTextureObject")) {
+        m_api->DestroyTextureObject(object);
+        m_api->FreeMipmappedArray(mipmaps);
+        return false;
     }
     // The mip-mapped array stays allocated as long as the process: the
-    // texture object does not own it.
-    return texture;
+    // texture objects do not own it.
+    texture     = object;
+    env_texture = env_object;
+    return true;
 }
 
 void

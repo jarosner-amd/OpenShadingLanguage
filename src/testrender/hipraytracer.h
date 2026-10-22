@@ -74,7 +74,14 @@ private:
     bool relocate_closures(std::vector<char>& pool, const char* device_base,
                            ClosureColor*& ci);
     bool fail(string_view message);
-    void* load_texture(ustring filename, void*& object);
+    // A texture on the GPU: the device GpuTexture (the handle OSL passes
+    // on) and the two texture objects it refers to.
+    struct TextureRecord {
+        void* device     = nullptr;
+        void* object     = nullptr;
+        void* env_object = nullptr;
+    };
+    TextureRecord load_texture(ustring filename);
 
     bool m_save = false;
     bool m_ok   = true;
@@ -85,7 +92,7 @@ private:
     std::unordered_map<const ShaderGroup*, std::unique_ptr<GpuGroup>> m_groups;
     std::mutex m_mutex;  // one GPU shading call at a time
     // Per file: the device GpuTexture (the handle) and its texture object.
-    std::unordered_map<ustring, std::pair<void*, void*>> m_textures;
+    std::unordered_map<ustring, TextureRecord> m_textures;
     std::mutex m_textures_mutex;
 };
 

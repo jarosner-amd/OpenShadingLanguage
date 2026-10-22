@@ -5,9 +5,12 @@ Compiled latlong.osl -> latlong.oso
 Compiled matte.osl -> matte.oso
 Compiled metal.osl -> metal.oso
 Compiled ward.osl -> ward.oso
+Compiled wrapuv.osl -> wrapuv.oso
 Computing diff of "cpu_cornell.exr" vs "gpu_cornell.exr"
 PASS
 Computing diff of "cpu_regions.exr" vs "gpu_regions.exr"
 PASS
 Computing diff of "cpu_env_regions.exr" vs "gpu_env_regions.exr"
+PASS
+Computing diff of "cpu_wrap_regions.exr" vs "gpu_wrap_regions.exr"
 PASS
