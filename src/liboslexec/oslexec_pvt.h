@@ -714,6 +714,9 @@ public:
     bool use_optix() const { return is_nvptx_backend(); }
     bool use_optix_cache() const { return m_gpu_target.enable_cache; }
 
+    /// Should the AMDGPU artifacts carry the marker that HART requires?
+    bool amdgpu_hart_marker() const { return m_amdgpu_hart_marker; }
+
     bool debug_nan() const { return m_debugnan; }
     bool debug_uninit() const { return m_debug_uninit; }
     bool lockgeom_default() const { return m_lockgeom_default; }
@@ -1081,6 +1084,9 @@ private:
     ustring m_gpu_backend_attr;        ///< "" or "amdgpu"
     std::string m_gpu_archs_attr;      ///< normalized, comma separated
     ustring m_gpu_artifact_kind_attr;  ///< "", "bitcode" or "llvmir"
+    /// Add HART's device-storage marker to each AMDGPU artifact. Fixed
+    /// together with the GPU target.
+    bool m_amdgpu_hart_marker = false;
     /// Set when the first shader group starts to compile. After that the GPU
     /// target can no longer change: the optimizer and the code generator
     /// both read it, and a change in between would make them disagree.

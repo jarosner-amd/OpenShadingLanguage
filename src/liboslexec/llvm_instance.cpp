@@ -39,6 +39,10 @@
 #    include <llvm/Transforms/Utils/Cloning.h>
 #endif
 
+#ifdef OSL_USE_HART
+#    include "hart_marker.h"
+#endif
+
 // Create external declarations for all built-in funcs we may call from LLVM
 #define DECL(name, signature) extern "C" void name();
 #include "builtindecl.h"
@@ -2860,6 +2864,12 @@ BackendLLVM::emit_gpu_artifacts(const GroupFunctions& funcs)
 #else
         apply_arch_attributes(arch);
         llvm::Module* module = ll.module();
+#endif
+#ifdef OSL_USE_HART
+        // Without the shadeops, every architecture reuses the same module;
+        // the marker is then added only once.
+        if (shadingsys().amdgpu_hart_marker())
+            add_hart_storage_marker(*module);
 #endif
         std::string payload;
         if (!ll.emit_gpu_artifact(desc, module, payload)) {

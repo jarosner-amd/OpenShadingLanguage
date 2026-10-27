@@ -15,6 +15,9 @@
 #include <OSL/genclosure.h>
 #include "backendcpp.h"
 #include "backendllvm.h"
+#ifdef OSL_USE_HART
+#    include "hart_marker.h"
+#endif
 #if OSL_USE_BATCHED
 #    include "batched_backendllvm.h"
 #    include <OSL/wide.h>
@@ -1863,6 +1866,27 @@ ShadingSystemImpl::attribute(string_view name, TypeDesc type, const void* val)
                                                      type.numelements()),
                                  m_gpu_artifact_kind_attr);
     }
+    if (name == "amdgpu_hart_marker" && type == TypeDesc::INT) {
+        const int marker = *(const int*)val;
+        if (marker != 0 && marker != 1) {
+            errorfmt("amdgpu_hart_marker must be 0 or 1, not {}.", marker);
+            return false;
+        }
+#ifndef OSL_USE_HART
+        if (marker) {
+            errorfmt("amdgpu_hart_marker needs OSL built with OSL_USE_HART.");
+            return false;
+        }
+#endif
+        if (m_gpu_target_frozen.load()
+            && (marker != 0) != m_amdgpu_hart_marker) {
+            errorfmt(
+                "The GPU target cannot be changed after a shader group has been compiled.");
+            return false;
+        }
+        m_amdgpu_hart_marker = marker != 0;
+        return true;
+    }
 
     ATTR_SET("statistics:level", int, m_statslevel);
     ATTR_SET("stat:rank_groups", int, m_stat_rank_groups);
@@ -2157,6 +2181,12 @@ ShadingSystemImpl::getattribute(string_view name, TypeDesc type, void* val)
     ATTR_DECODE_STRING("gpu_backend", m_gpu_backend_attr);
     ATTR_DECODE_STRING("gpu_archs", m_gpu_archs_attr);
     ATTR_DECODE_STRING("gpu_artifact_kind", m_gpu_artifact_kind_attr);
+    ATTR_DECODE("amdgpu_hart_marker", int, m_amdgpu_hart_marker);
+#ifdef OSL_USE_HART
+    // The marker value HART must match, so that a renderer can report a
+    // version mismatch itself.
+    ATTR_DECODE("amdgpu_hart_abi", uint64_t, hart_storage_abi());
+#endif
     ATTR_DECODE("vector_width", int, m_vector_width);
     ATTR_DECODE("opt_passes", int, m_opt_passes);
     ATTR_DECODE("optimize_nondebug", int, m_optimize_nondebug);
