@@ -303,6 +303,22 @@ else ()
     message (STATUS "AMDGPU device shadeops disabled")
 endif ()
 
+# HART: only one header of the HART SDK is used, for the value of the
+# device-storage marker that HART requires in every shader module. Nothing is
+# linked. That header includes the HIP runtime API header from ROCm.
+if (OSL_USE_HART)
+    if (NOT OSL_ENABLE_AMDGPU)
+        message (FATAL_ERROR "OSL_USE_HART requires OSL_ENABLE_AMDGPU=ON")
+    endif ()
+    find_path (HART_INCLUDE_DIR NAMES amd/hart/hart_device.h
+               HINTS ${HART_ROOT} $ENV{HART_ROOT}
+               PATH_SUFFIXES include)
+    if (NOT HART_INCLUDE_DIR)
+        message (FATAL_ERROR "OSL_USE_HART: cannot find amd/hart/hart_device.h; set HART_ROOT to the HART SDK")
+    endif ()
+    message (STATUS "HART headers: ${HART_INCLUDE_DIR}")
+endif ()
+
 
 ###########################################################################
 # Tessil/robin-map

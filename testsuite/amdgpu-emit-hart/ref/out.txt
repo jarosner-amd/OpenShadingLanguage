@@ -1,0 +1,24 @@
+Compiled plain.osl -> plain.oso
+
+AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=L symbol=__direct_callable__osl_layer_group_hart_name_L
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_hart
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_hart_name_L
+Wrote amdgpu_hart_gfx1201.ll
+marker one definition: ok
+marker internal i64 constant, addrspace 4, align 8: ok
+marker in llvm.compiler.used: ok
+
+AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=L symbol=__direct_callable__osl_layer_group_none_name_L
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_none
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_none_name_L
+Wrote amdgpu_none_gfx1201.ll
+marker absent: ok
+ERROR: amdgpu_hart_marker must be 0 or 1, not 2.
+
+AMDGPU artifact 0: arch=gfx1201 triple=amdgcn-amd-amdhsa format=llvmir exports=3
+  export 0: kind=entry layer=L symbol=__direct_callable__osl_layer_group_bad_name_L
+  export 1: kind=init layer=- symbol=__direct_callable__osl_init_group_bad
+  export 2: kind=fused layer=- symbol=__direct_callable__fused_bad_name_L
+Wrote amdgpu_bad_gfx1201.ll
