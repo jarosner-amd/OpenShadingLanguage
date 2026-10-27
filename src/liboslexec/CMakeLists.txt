@@ -139,6 +139,10 @@ if (OSL_BUILD_BATCHED)
         )
 endif()    
 
+if (OSL_USE_HART)
+    list (APPEND lib_src hart_marker.cpp)
+endif ()
+
 if (BUILD_SHARED_LIBS)
     # oslcomp symbols used in oslexec
     list(APPEND lib_src
@@ -647,6 +651,13 @@ target_compile_definitions (${local_lib}
 if (partio_FOUND)
     target_link_libraries(${local_lib} PRIVATE partio::partio ZLIB::ZLIB)
     target_compile_definitions (${local_lib} PRIVATE USE_PARTIO=1)
+endif ()
+if (OSL_USE_HART)
+    target_compile_definitions (${local_lib} PRIVATE OSL_USE_HART=1)
+    # Only hart_marker.cpp includes the HART header.
+    set_source_files_properties (hart_marker.cpp PROPERTIES
+        INCLUDE_DIRECTORIES "${HART_INCLUDE_DIR};${ROCM_PATH}/include"
+        COMPILE_DEFINITIONS __HIP_PLATFORM_AMD__=1)
 endif ()
 
 # Disable RTTI from just the one module where we have classes that inherit

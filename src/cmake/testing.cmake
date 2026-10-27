@@ -632,6 +632,10 @@ macro (osl_add_all_tests)
                                   OSL_TESTRENDER_RS_DIR=${CMAKE_BINARY_DIR}/src/testrender)
                 endif ()
             endforeach ()
+            # The HART device-storage marker, only in a build with it.
+            if (OSL_USE_HART)
+                TESTSUITE ( amdgpu-emit-hart )
+            endif ()
             # Renders on an AMD GPU, so only on request. testrender loads
             # hiprtc from the ROCm installation (HIP_PATH).
             if (OSL_TEST_AMDGPU_RUN)
