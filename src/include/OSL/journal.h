@@ -38,6 +38,35 @@ OSL_NAMESPACE_BEGIN
 namespace journal {
 
 namespace pvt {
+
+#if OSL_GPU_DEVICE_COMPILE && !defined(__CUDACC__)
+// A HIP device compile has no std::atomic. This is the part of its interface
+// that the journal uses, on the compiler's own atomic builtins. Relaxed
+// ordering is enough: the counters only hand out space and are read by the
+// host after the kernel has finished. It has the same size and alignment as
+// std::atomic<uint32_t>, so a buffer written by a device is read by the host.
+struct DeviceAtomicUint32 {
+    uint32_t value;
+    OSL_HOSTDEVICE uint32_t load() const
+    {
+        return __atomic_load_n(&value, __ATOMIC_RELAXED);
+    }
+    OSL_HOSTDEVICE operator uint32_t() const { return load(); }
+    OSL_HOSTDEVICE uint32_t fetch_add(uint32_t n)
+    {
+        return __atomic_fetch_add(&value, n, __ATOMIC_RELAXED);
+    }
+    OSL_HOSTDEVICE uint32_t operator+=(uint32_t n) { return fetch_add(n) + n; }
+    OSL_HOSTDEVICE bool compare_exchange_weak(uint32_t& expected,
+                                              uint32_t desired)
+    {
+        return __atomic_compare_exchange_n(&value, &expected, desired,
+                                           /*weak=*/true, __ATOMIC_RELAXED,
+                                           __ATOMIC_RELAXED);
+    }
+};
+#endif
+
 //Per thread information for its page
 struct alignas(64) PageInfo {
     uint32_t pos;
@@ -54,6 +83,8 @@ struct Organization  //Initial bookkeeping
 // rename free_pos bytes_used;
 #ifdef __CUDACC__
     using AtomicUint32 = cuda::std::atomic<std::uint32_t>;
+#elif OSL_GPU_DEVICE_COMPILE
+    using AtomicUint32 = DeviceAtomicUint32;
 #else
     using AtomicUint32 = std::atomic<std::uint32_t>;
 #endif
@@ -91,6 +122,10 @@ enum class Content : uint8_t {
 };
 
 static_assert(sizeof(PageInfo) % 64 == 0, "PageInfo needs to be cache aligned");
+// The host Reader and a device Writer must agree on the layout of the buffer.
+static_assert(sizeof(Organization::AtomicUint32) == sizeof(uint32_t)
+                  && alignof(Organization::AtomicUint32) == alignof(uint32_t),
+              "journal atomics must have the layout of a plain uint32_t");
 }  // namespace pvt
 
 
@@ -178,13 +213,22 @@ private:
     Reporter& m_reporter;
 };
 
+// Device code must not call printf: it needs a host-call buffer for every
+// kernel that contains the call. So the Writer's internal checks are only
+// active in debug builds there.
+#if OSL_GPU_DEVICE_COMPILE
+#    define OSL_JOURNAL_ASSERT(x) OSL_DASSERT(x)
+#else
+#    define OSL_JOURNAL_ASSERT(x) OSL_ASSERT(x)
+#endif
+
 /// Writer is a lightweight class meant to be constructed as a local variable
 /// with an already initalized journal buffer and used to record error,
 /// warnings, prints, or fprints into the buffer and then go out of scope.
 /// Writer implementation entirely inlinable and intended for use on devices.
 class OSLEXECPUBLIC Writer {
 public:
-    Writer(void* buffer)
+    OSL_HOSTDEVICE Writer(void* buffer)
         : m_buffer(static_cast<uint8_t*>(buffer))
         , m_org(*(reinterpret_cast<pvt::Organization*>(buffer)))
         , m_pageinfo_by_thread_index(reinterpret_cast<pvt::PageInfo*>(
@@ -192,20 +236,23 @@ public:
     {
     }
 
-    bool record_errorfmt(int thread_index, int shade_index,
-                         OSL::ustringhash fmt_specification, int32_t arg_count,
-                         const EncodedType* arg_types, uint32_t arg_values_size,
-                         uint8_t* arg_values)
+    OSL_HOSTDEVICE bool record_errorfmt(int thread_index, int shade_index,
+                                        OSL::ustringhash fmt_specification,
+                                        int32_t arg_count,
+                                        const EncodedType* arg_types,
+                                        uint32_t arg_values_size,
+                                        uint8_t* arg_values)
     {
         return write_entry(thread_index, shade_index, pvt::Content::Error,
                            fmt_specification, OSL::ustringhash {} /*filename*/,
                            arg_count, arg_types, arg_values_size, arg_values);
     }
 
-    bool record_warningfmt(int max_warnings_per_thread, int thread_index,
-                           int shade_index, OSL::ustringhash fmt_specification,
-                           int32_t arg_count, const EncodedType* arg_types,
-                           uint32_t arg_values_size, uint8_t* arg_values)
+    OSL_HOSTDEVICE bool
+    record_warningfmt(int max_warnings_per_thread, int thread_index,
+                      int shade_index, OSL::ustringhash fmt_specification,
+                      int32_t arg_count, const EncodedType* arg_types,
+                      uint32_t arg_values_size, uint8_t* arg_values)
     {
         auto& info = m_pageinfo_by_thread_index[thread_index];
 
@@ -218,21 +265,25 @@ public:
                            arg_count, arg_types, arg_values_size, arg_values);
     }
 
-    bool record_printfmt(int thread_index, int shade_index,
-                         OSL::ustringhash fmt_specification, int32_t arg_count,
-                         const EncodedType* arg_types, uint32_t arg_values_size,
-                         uint8_t* arg_values)
+    OSL_HOSTDEVICE bool record_printfmt(int thread_index, int shade_index,
+                                        OSL::ustringhash fmt_specification,
+                                        int32_t arg_count,
+                                        const EncodedType* arg_types,
+                                        uint32_t arg_values_size,
+                                        uint8_t* arg_values)
     {
         return write_entry(thread_index, shade_index, pvt::Content::Print,
                            fmt_specification, OSL::ustringhash {} /*filename*/,
                            arg_count, arg_types, arg_values_size, arg_values);
     }
 
-    bool record_filefmt(int thread_index, int shade_index,
-                        OSL::ustringhash filename_hash,
-                        OSL::ustringhash fmt_specification, int32_t arg_count,
-                        const EncodedType* arg_types, uint32_t arg_values_size,
-                        uint8_t* arg_values)
+    OSL_HOSTDEVICE bool record_filefmt(int thread_index, int shade_index,
+                                       OSL::ustringhash filename_hash,
+                                       OSL::ustringhash fmt_specification,
+                                       int32_t arg_count,
+                                       const EncodedType* arg_types,
+                                       uint32_t arg_values_size,
+                                       uint8_t* arg_values)
     {
         return write_entry(thread_index, shade_index, pvt::Content::FilePrint,
                            fmt_specification, filename_hash, arg_count,
@@ -240,16 +291,16 @@ public:
     }
 
 private:
-    static constexpr size_t requiredForPageTransition()
+    OSL_HOSTDEVICE static constexpr size_t requiredForPageTransition()
     {
         return sizeof(pvt::Content::PageTransition) + sizeof(uint32_t);
     }
-    bool allocatePage(int thread_index)
+    OSL_HOSTDEVICE bool allocatePage(int thread_index)
     {
         using pvt::Content;
         auto& info = m_pageinfo_by_thread_index[thread_index];
 
-        OSL_ASSERT(info.remaining >= requiredForPageTransition());
+        OSL_JOURNAL_ASSERT(info.remaining >= requiredForPageTransition());
 
         // pre check if next_pos >= buf_size to prevent continuing to
         // increment free_pos once its already past the end of a page
@@ -277,11 +328,11 @@ private:
         return true;
     }
 
-    bool write_entry(int thread_index, int shade_index, pvt::Content content,
-                     OSL::ustringhash fmt_specification,
-                     OSL::ustringhash filename, int32_t arg_count,
-                     const EncodedType* arg_types, uint32_t arg_values_size,
-                     uint8_t* arg_values)
+    OSL_HOSTDEVICE bool
+    write_entry(int thread_index, int shade_index, pvt::Content content,
+                OSL::ustringhash fmt_specification, OSL::ustringhash filename,
+                int32_t arg_count, const EncodedType* arg_types,
+                uint32_t arg_values_size, uint8_t* arg_values)
     {
         using pvt::Content;
 
@@ -320,7 +371,7 @@ private:
             }
         }
 
-        OSL_ASSERT(info.remaining >= required_bytes);
+        OSL_JOURNAL_ASSERT(info.remaining >= required_bytes);
         uint8_t* dest_ptr = m_buffer + info.pos;
 
         memcpy(dest_ptr, &content, sizeof(content));
@@ -354,6 +405,8 @@ private:
     pvt::Organization& m_org;
     pvt::PageInfo* m_pageinfo_by_thread_index;
 };
+
+#undef OSL_JOURNAL_ASSERT
 
 }  // namespace journal
 
