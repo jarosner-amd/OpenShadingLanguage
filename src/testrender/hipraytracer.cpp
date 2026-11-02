@@ -18,8 +18,8 @@
 #include "../testshade/amdgpu_artifacts.h"
 
 #ifdef OSL_TESTRENDER_HIP
-#    include "amdgpu_rend_lib.h"
-#    include "hiploader.h"
+#    include "../testshade/amdgpu_rend_lib.h"
+#    include "../testshade/hiploader.h"
 #endif
 
 OSL_NAMESPACE_BEGIN

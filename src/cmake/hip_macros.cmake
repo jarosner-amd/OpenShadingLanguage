@@ -83,3 +83,46 @@ function ( HIP_SHADEOPS_COMPILE prefix arch output_bc input_srcs include_dirs )
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         VERBATIM )
 endfunction ()
+
+# The renderer services of testshade and testrender
+# (src/test_common/rs_simplerend.cpp) as AMDGPU bitcode, one file per
+# architecture in OSL_HIP_TARGET_ARCHS, embedded in the calling program with a
+# lookup table, amdgpu_rend_lib(arch) (src/testshade/amdgpu_rend_lib.cpp.in).
+# The program links them with each shader group at run time (hiprtc). The
+# embedded symbols are named ${prefix}_amdgpu_rend_lib_<arch>, and the custom
+# target that builds the bitcode is ${prefix}_amdgpu_rend_lib. Appends the
+# sources to compile (the embedded blocks, the table and the HIP loader) to
+# the list named by srcs_var. The program also needs src/testshade and
+# ${ROCM_PATH}/include on its include path.
+function ( EMBED_AMDGPU_REND_LIB prefix srcs_var )
+    set (testshade_dir "${CMAKE_SOURCE_DIR}/src/testshade")
+    set (include_dirs ${OpenImageIO_INCLUDES}
+         ${CMAKE_SOURCE_DIR}/src/include ${CMAKE_BINARY_DIR}/include
+         ${IMATH_INCLUDES})
+    set (srcs ${${srcs_var}})
+    set (amdgpu_rend_lib_decls "")
+    set (amdgpu_rend_lib_entries "")
+    foreach (arch ${OSL_HIP_TARGET_ARCHS})
+        MAKE_HIP_BITCODE ( ${CMAKE_SOURCE_DIR}/src/test_common/rs_simplerend.cpp
+                           "_amdgpu_${arch}" ${arch} rend_lib_amdgpu_bc
+                           "${include_dirs}" )
+        list (APPEND rend_lib_amdgpu_bcs ${rend_lib_amdgpu_bc})
+        set (sym "${prefix}_amdgpu_rend_lib_${arch}")
+        set (rend_lib_amdgpu_cpp "${CMAKE_CURRENT_BINARY_DIR}/rend_lib_amdgpu_${arch}.bc.cpp")
+        MAKE_EMBEDDED_CPP ( ${sym} ${rend_lib_amdgpu_cpp} ${rend_lib_amdgpu_bc} )
+        list (APPEND srcs ${rend_lib_amdgpu_cpp})
+        string (APPEND amdgpu_rend_lib_decls
+                "extern unsigned char ${sym}_block[];\nextern int ${sym}_size;\n")
+        string (APPEND amdgpu_rend_lib_entries
+                "        { \"${arch}\", ${sym}_block, &${sym}_size },\n")
+    endforeach ()
+    add_custom_target (${prefix}_amdgpu_rend_lib ALL
+        DEPENDS ${rend_lib_amdgpu_bcs})
+    configure_file (${testshade_dir}/amdgpu_rend_lib.cpp.in
+                    "${CMAKE_CURRENT_BINARY_DIR}/amdgpu_rend_lib.cpp" @ONLY)
+    # The HIP runtime and hiprtc are loaded at run time (hiploader.cpp), so
+    # only their headers are needed, not their libraries.
+    list (APPEND srcs ${testshade_dir}/hiploader.cpp
+          "${CMAKE_CURRENT_BINARY_DIR}/amdgpu_rend_lib.cpp")
+    set (${srcs_var} ${srcs} PARENT_SCOPE)
+endfunction ()

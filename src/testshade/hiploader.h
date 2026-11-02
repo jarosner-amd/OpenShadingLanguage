@@ -12,13 +12,13 @@
 
 OSL_NAMESPACE_BEGIN
 
-// The parts of the HIP runtime and of hiprtc that testrender uses, loaded
-// at run time, so that testrender needs neither to build or to start. The
-// libraries are found through the environment variables
+// The parts of the HIP runtime and of hiprtc that testshade and testrender
+// use, loaded at run time, so that neither needs them to build or to start.
+// The libraries are found through the environment variables
 // OSL_HIP_RUNTIME_LIBRARY and OSL_HIPRTC_LIBRARY, or else by their usual
-// names. Only hiploader.cpp sees the HIP headers: they clash with
-// testrender's own (both define float3), so this interface uses plain
-// types. On failure, a call returns false or null and error() says why.
+// names. Only hiploader.cpp sees the HIP headers: they clash with the
+// renderers' own (both define float3), so this interface uses plain types.
+// On failure, a call returns false or null and error() says why.
 class HipRuntime {
 public:
     HipRuntime();
