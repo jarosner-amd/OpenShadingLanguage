@@ -777,8 +777,8 @@ rs_filefmt(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename_hash,
 }
 #elif !defined(__CUDA_ARCH__)
 // On an AMDGPU device the messages are dropped for now: OSL/journal.h is
-// host only, and testrender does not run shaders on AMD GPUs yet, so no
-// host would read them. (On CUDA, cuda/rend_lib.cu defines these.)
+// host only, so testshade and testrender --amdgpu-run cannot record them.
+// (On CUDA, cuda/rend_lib.cu defines these.)
 OSL_RSOP OSL_HOSTDEVICE void
 rs_errorfmt(OSL::OpaqueExecContextPtr, OSL::ustringhash, int32_t,
             const OSL::EncodedType*, uint32_t, uint8_t*)
