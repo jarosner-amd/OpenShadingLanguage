@@ -91,9 +91,9 @@ endfunction ()
 # The program links them with each shader group at run time (hiprtc). The
 # embedded symbols are named ${prefix}_amdgpu_rend_lib_<arch>, and the custom
 # target that builds the bitcode is ${prefix}_amdgpu_rend_lib. Appends the
-# sources to compile (the embedded blocks, the table and the HIP loader) to
-# the list named by srcs_var. The program also needs src/testshade and
-# ${ROCM_PATH}/include on its include path.
+# sources to compile (the embedded blocks, the table, the HIP loader and the
+# GPU textures) to the list named by srcs_var. The program also needs
+# src/testshade and ${ROCM_PATH}/include on its include path.
 function ( EMBED_AMDGPU_REND_LIB prefix srcs_var )
     set (testshade_dir "${CMAKE_SOURCE_DIR}/src/testshade")
     set (include_dirs ${OpenImageIO_INCLUDES}
@@ -123,6 +123,7 @@ function ( EMBED_AMDGPU_REND_LIB prefix srcs_var )
     # The HIP runtime and hiprtc are loaded at run time (hiploader.cpp), so
     # only their headers are needed, not their libraries.
     list (APPEND srcs ${testshade_dir}/hiploader.cpp
+          ${testshade_dir}/amdgpu_textures.cpp
           "${CMAKE_CURRENT_BINARY_DIR}/amdgpu_rend_lib.cpp")
     set (${srcs_var} ${srcs} PARENT_SCOPE)
 endfunction ()

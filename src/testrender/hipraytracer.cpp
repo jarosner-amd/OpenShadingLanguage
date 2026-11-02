@@ -19,6 +19,7 @@
 
 #ifdef OSL_TESTRENDER_HIP
 #    include "../testshade/amdgpu_rend_lib.h"
+#    include "../testshade/amdgpu_textures.h"
 #    include "../testshade/hiploader.h"
 #endif
 
@@ -75,6 +76,7 @@ static constexpr size_t k_groupdata_offset
 
 // Without AMDGPU support there is nothing to hold.
 class HipRuntime {};
+class AmdgpuTextures {};
 struct HipRaytracer::GpuGroup {};
 struct HipRaytracer::Device {};
 
@@ -88,11 +90,7 @@ HipRaytracer::~HipRaytracer()
 {
 #ifdef OSL_TESTRENDER_HIP
     if (m_hip) {
-        for (auto& t : m_textures) {
-            m_hip->free(t.second.device);
-            m_hip->destroy_texture(t.second.object);
-            m_hip->destroy_texture(t.second.env_object);
-        }
+        m_textures.reset();
         for (auto& g : m_groups)
             m_hip->unload_module(g.second->module);
         if (m_dev)
@@ -244,12 +242,6 @@ HipRaytracer::get_texture_handle(ustring filename, ShadingContext* context,
     return SimpleRaytracer::get_texture_handle(filename, context, options);
 }
 
-HipRaytracer::TextureRecord
-HipRaytracer::load_texture(ustring)
-{
-    return TextureRecord();
-}
-
 void*
 HipRaytracer::device_alloc(size_t)
 {
@@ -287,8 +279,9 @@ HipRaytracer::run(std::string& error)
         if (amdgpu_rend_lib(arch).empty() || !m_hip->set_device(d))
             continue;
         print("AMD GPU {}: {} ({})\n", d, name, arch);
-        m_arch = arch;
-        m_run  = true;
+        m_arch     = arch;
+        m_run      = true;
+        m_textures = std::make_unique<AmdgpuTextures>(*m_hip, errhandler());
         return arch;
     }
     error = count ? fmtformat("no AMD GPU with an architecture this "
@@ -356,127 +349,14 @@ HipRaytracer::build_module(ShaderGroup& group,
 
 
 
-// Every mip level of the file as 4 floats per texel; channels the file
-// does not have are 0, as the CPU texture system's default fill. Returns
-// the device GpuTexture and the texture objects.
-HipRaytracer::TextureRecord
-HipRaytracer::load_texture(ustring filename)
-{
-    TextureRecord none;
-    std::vector<HipRuntime::TextureLevel> levels;
-    for (int level = 0;; ++level) {
-        OIIO::ImageBuf image(filename, 0, level);
-        if (!image.init_spec(filename, 0, level)) {
-            image.geterror();  // no such level: that is how the loop ends
-            break;
-        }
-        const OIIO::ImageSpec& spec = image.spec();
-        HipRuntime::TextureLevel l;
-        l.width  = spec.width;
-        l.height = spec.height;
-        l.rgba.assign(size_t(l.width) * l.height * 4, 0.0f);
-        OIIO::ROI roi(spec.x, spec.x + spec.width, spec.y, spec.y + spec.height,
-                      spec.z, spec.z + 1, 0, std::min(4, spec.nchannels));
-        if (!image.get_pixels(roi, OIIO::TypeFloat, l.rgba.data(),
-                              4 * sizeof(float))) {
-            errhandler().errorfmt("Could not read {} (mip level {}): {}",
-                                  filename, level, image.geterror());
-            return none;
-        }
-        levels.push_back(std::move(l));
-    }
-    if (levels.empty()) {
-        errhandler().errorfmt("Could not read {}", filename);
-        return none;
-    }
-    // A file without mip levels: make them, halving with a box filter down
-    // to one texel, so that a lookup with a large footprint averages over
-    // it, as the CPU texture system does. With a single level, the GPU
-    // would take one bilinear sample instead.
-    const bool make_mips = levels.size() == 1;
-    while (make_mips && (levels.back().width > 1 || levels.back().height > 1)) {
-        const HipRuntime::TextureLevel& from = levels.back();
-        HipRuntime::TextureLevel to;
-        to.width  = std::max(1, from.width / 2);
-        to.height = std::max(1, from.height / 2);
-        to.rgba.assign(size_t(to.width) * to.height * 4, 0.0f);
-        for (int y = 0; y < to.height; ++y)
-            for (int x = 0; x < to.width; ++x)
-                for (int c = 0; c < 4; ++c) {
-                    float sum = 0.0f;
-                    for (int dy = 0; dy < 2; ++dy)
-                        for (int dx = 0; dx < 2; ++dx) {
-                            int sx = std::min(2 * x + dx, from.width - 1);
-                            int sy = std::min(2 * y + dy, from.height - 1);
-                            sum += from.rgba[(size_t(sy) * from.width + sx) * 4
-                                             + c];
-                        }
-                    to.rgba[(size_t(y) * to.width + x) * 4 + c] = 0.25f * sum;
-                }
-        levels.push_back(std::move(to));
-    }
-    // The wrap modes the file asks for, as the CPU texture system takes
-    // them when a lookup does not name any: black unless the file says
-    // otherwise ("wrapmodes" holds one mode, or one for s and one for t).
-    OIIO::ImageBuf top(filename);
-    top.init_spec(filename, 0, 0);
-    std::string wrap_s = "black", wrap_t = "black";
-    std::string wraps = top.spec().get_string_attribute("wrapmodes");
-    if (!wraps.empty()) {
-        size_t comma = wraps.find(',');
-        wrap_s       = wraps.substr(0, comma);
-        wrap_t = comma == std::string::npos ? wrap_s : wraps.substr(comma + 1);
-    }
-    TextureRecord rec;
-    if (!m_hip->create_textures(levels, wrap_s, wrap_t, rec.object,
-                                rec.env_object)) {
-        errhandler().errorfmt("Could not make a GPU texture of {}: {}",
-                              filename, m_hip->error());
-        return none;
-    }
-    // What environment() needs besides the texels: which way is up, as
-    // OpenImageIO decides it, and the height for clamping at the poles.
-    // The texture system's default ("latlong_up", y unless set otherwise),
-    // unless the file says.
-    GpuTexture info;
-    info.object     = rec.object;
-    info.env_object = rec.env_object;
-    info.y_up       = true;
-    const char* up  = nullptr;
-    if (texturesys()->getattribute("latlong_up", OIIO::TypeString, &up) && up)
-        info.y_up = (up[0] == 'y');
-    std::string file_up = top.spec().get_string_attribute("oiio:updirection");
-    if (file_up == "y")
-        info.y_up = true;
-    else if (file_up == "z")
-        info.y_up = false;
-    info.height = levels[0].height;
-    rec.device  = m_hip->alloc(sizeof(info));
-    if (!rec.device || !m_hip->to_device(rec.device, &info, sizeof(info))) {
-        m_hip->free(rec.device);
-        m_hip->destroy_texture(rec.object);
-        m_hip->destroy_texture(rec.env_object);
-        errhandler().errorfmt("Could not copy the GPU texture of {}: {}",
-                              filename, m_hip->error());
-        return none;
-    }
-    return rec;
-}
-
-
-
 RendererServices::TextureHandle*
 HipRaytracer::get_texture_handle(ustring filename, ShadingContext* context,
                                  const TextureOpt* options)
 {
     if (!m_run)
         return SimpleRaytracer::get_texture_handle(filename, context, options);
-    std::lock_guard<std::mutex> lock(m_textures_mutex);
-    auto found = m_textures.find(filename);
-    if (found == m_textures.end()) {
-        found = m_textures.emplace(filename, load_texture(filename)).first;
-    }
-    return reinterpret_cast<TextureHandle*>(found->second.device);
+    return reinterpret_cast<TextureHandle*>(
+        m_textures->handle(filename, texturesys()));
 }
 
 

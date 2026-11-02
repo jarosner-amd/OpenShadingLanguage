@@ -15,6 +15,7 @@
 
 #ifdef OSL_TESTSHADE_HIP
 #    include "amdgpu_rend_lib.h"
+#    include "amdgpu_textures.h"
 #    include "hiploader.h"
 #endif
 
@@ -59,6 +60,7 @@ static constexpr int k_chunk_points = 65536;
 
 // Without AMDGPU support there is nothing to hold.
 class HipRuntime {};
+class AmdgpuTextures {};
 struct HipGridRenderer::Device {};
 
 #endif
@@ -70,6 +72,7 @@ HipGridRenderer::HipGridRenderer() = default;
 HipGridRenderer::~HipGridRenderer()
 {
 #ifdef OSL_TESTSHADE_HIP
+    m_textures.reset();
     if (m_hip && m_dev) {
         m_hip->unload_module(m_dev->module);
         for (auto& x : m_dev->xforms)
@@ -152,6 +155,13 @@ HipGridRenderer::init_device()
     return false;
 }
 
+RendererServices::TextureHandle*
+HipGridRenderer::get_texture_handle(ustring filename, ShadingContext* context,
+                                    const TextureOpt* options)
+{
+    return SimpleRenderer::get_texture_handle(filename, context, options);
+}
+
 void*
 HipGridRenderer::device_alloc(size_t)
 {
@@ -188,7 +198,8 @@ HipGridRenderer::run(std::string& error)
         seen += (seen.empty() ? "" : ", ") + arch;
         if (amdgpu_rend_lib(arch).empty() || !m_hip->set_device(d))
             continue;
-        m_arch = arch;
+        m_arch     = arch;
+        m_textures = std::make_unique<AmdgpuTextures>(*m_hip, errhandler());
         return arch;
     }
     error = count ? fmtformat("no AMD GPU with an architecture this "
@@ -466,6 +477,20 @@ HipGridRenderer::finalize_pixel_buffer()
         ib->set_pixels(OIIO::ROI::All(), ib->spec().format,
                        host.data() + m_output_offsets[k]);
     }
+}
+
+
+
+// The device GpuTexture of the file: the handle that the renderer services
+// on the GPU (rs_simplerend.cpp) look up with.
+RendererServices::TextureHandle*
+HipGridRenderer::get_texture_handle(ustring filename, ShadingContext* context,
+                                    const TextureOpt* options)
+{
+    if (!m_textures)
+        return SimpleRenderer::get_texture_handle(filename, context, options);
+    return reinterpret_cast<TextureHandle*>(
+        m_textures->handle(filename, texturesys()));
 }
 
 
