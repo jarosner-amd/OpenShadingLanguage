@@ -22,8 +22,7 @@ class HipRuntime;
 // ShadingSystem must have gpu_backend "amdgpu", the architecture that run()
 // returns, and output placement: the outputs' symbol locations are offsets
 // into one device buffer (output_offset()). Needs a build with
-// OSL_ENABLE_AMDGPU; printf, error and warning messages are dropped on the
-// GPU, and there is no userdata. Textures are GPU textures
+// OSL_ENABLE_AMDGPU; there is no userdata. Textures are GPU textures
 // (AmdgpuTextures), which filter like the GPU's texture units.
 class HipGridRenderer final : public SimpleRenderer {
 public:
@@ -40,6 +39,19 @@ public:
     // ones.
     using GlobalsSetup = std::function<void(ShaderGlobals&, int x, int y)>;
     void set_globals_setup(GlobalsSetup setup) { m_setup = std::move(setup); }
+
+    // Record the printf, error and warning messages of the shaders in a
+    // journal (OSL/journal.h). Each launch gets a new journal, with a
+    // journal thread for each of its grid points (the ShaderGlobals
+    // thread_index) and `pool_bytes` more for longer messages; `reader` gets
+    // it after the launch, if anything was written. Without a reader the
+    // messages are dropped.
+    using JournalReader = std::function<void(const uint8_t* journal)>;
+    void set_journal(size_t pool_bytes, JournalReader reader)
+    {
+        m_journal_pool   = pool_bytes;
+        m_journal_reader = std::move(reader);
+    }
 
     bool add_output(string_view varname, string_view filename,
                     TypeDesc datatype, int nchannels) override;
@@ -75,12 +87,16 @@ private:
     bool build_module(const std::vector<char>& artifact,
                       const std::string& fused);
     bool init_device();
+    bool upload_context(void* journal);
+    bool read_journal();
 
     std::unique_ptr<HipRuntime> m_hip;
     std::unique_ptr<Device> m_dev;
     std::unique_ptr<AmdgpuTextures> m_textures;
     std::string m_arch;
     GlobalsSetup m_setup;
+    JournalReader m_journal_reader;
+    size_t m_journal_pool = 0;
     std::vector<size_t> m_output_offsets;
     size_t m_outputs_size = 0;
     bool m_rendered       = false;

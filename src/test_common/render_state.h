@@ -28,6 +28,9 @@ struct RenderContext {
     float hither;
     float yon;
     void* journal_buffer;
+    // The ShadingSystem's max_warnings_per_thread, for the journal on a GPU,
+    // where OSL's own copy cannot be read.
+    int max_warnings_per_thread;
 };
 
 class StackClosurePool {

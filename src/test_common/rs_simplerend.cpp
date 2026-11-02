@@ -18,6 +18,8 @@
 
 #if !OSL_GPU_DEVICE_COMPILE
 #    include <OSL/fmt_util.h>
+#endif
+#if !OSL_GPU_DEVICE_COMPILE || !defined(__CUDA_ARCH__)
 #    include <OSL/journal.h>
 #endif
 #include <OSL/rendererservices.h>
@@ -719,15 +721,27 @@ rs_get_interpolated_test(void* val)
     return true;
 }
 
-#if !OSL_GPU_DEVICE_COMPILE
+// The messages go to the journal (OSL/journal.h), on the host and on an AMD
+// GPU, where the renderer copies the journal back for the host to read. A
+// renderer without a journal (null) drops them. (On CUDA, cuda/rend_lib.cu
+// defines these.)
+#if !OSL_GPU_DEVICE_COMPILE || !defined(__CUDA_ARCH__)
+static OSL_HOSTDEVICE void*
+journal_buffer(OSL::OpaqueExecContextPtr ec)
+{
+    auto rc = OSL::get_rs<RenderState>(ec)->context;
+    return rc ? rc->journal_buffer : nullptr;
+}
+
 OSL_RSOP OSL_HOSTDEVICE void
 rs_errorfmt(OSL::OpaqueExecContextPtr ec, OSL::ustringhash fmt_specification,
             int32_t arg_count, const OSL::EncodedType* argTypes,
             uint32_t argValuesSize, uint8_t* argValues)
 {
-    auto rc = OSL::get_rs<RenderState>(ec)->context;
-
-    OSL::journal::Writer jw { rc->journal_buffer };
+    void* buffer = journal_buffer(ec);
+    if (!buffer)
+        return;
+    OSL::journal::Writer jw { buffer };
     jw.record_errorfmt(OSL::get_thread_index(ec), OSL::get_shade_index(ec),
                        fmt_specification, arg_count, argTypes, argValuesSize,
                        argValues);
@@ -738,13 +752,19 @@ rs_warningfmt(OSL::OpaqueExecContextPtr ec, OSL::ustringhash fmt_specification,
               int32_t arg_count, const OSL::EncodedType* argTypes,
               uint32_t argValuesSize, uint8_t* argValues)
 {
-    auto rc = OSL::get_rs<RenderState>(ec)->context;
-
-    OSL::journal::Writer jw { rc->journal_buffer };
-    jw.record_warningfmt(OSL::get_max_warnings_per_thread(ec),
-                         OSL::get_thread_index(ec), OSL::get_shade_index(ec),
-                         fmt_specification, arg_count, argTypes, argValuesSize,
-                         argValues);
+    void* buffer = journal_buffer(ec);
+    if (!buffer)
+        return;
+#    if OSL_GPU_DEVICE_COMPILE
+    int max_warnings
+        = OSL::get_rs<RenderState>(ec)->context->max_warnings_per_thread;
+#    else
+    int max_warnings = OSL::get_max_warnings_per_thread(ec);
+#    endif
+    OSL::journal::Writer jw { buffer };
+    jw.record_warningfmt(max_warnings, OSL::get_thread_index(ec),
+                         OSL::get_shade_index(ec), fmt_specification, arg_count,
+                         argTypes, argValuesSize, argValues);
 }
 
 
@@ -753,9 +773,10 @@ rs_printfmt(OSL::OpaqueExecContextPtr ec, OSL::ustringhash fmt_specification,
             int32_t arg_count, const OSL::EncodedType* argTypes,
             uint32_t argValuesSize, uint8_t* argValues)
 {
-    auto rc = OSL::get_rs<RenderState>(ec)->context;
-
-    OSL::journal::Writer jw { rc->journal_buffer };
+    void* buffer = journal_buffer(ec);
+    if (!buffer)
+        return;
+    OSL::journal::Writer jw { buffer };
     jw.record_printfmt(OSL::get_thread_index(ec), OSL::get_shade_index(ec),
                        fmt_specification, arg_count, argTypes, argValuesSize,
                        argValues);
@@ -768,38 +789,12 @@ rs_filefmt(OSL::OpaqueExecContextPtr ec, OSL::ustringhash filename_hash,
            const OSL::EncodedType* argTypes, uint32_t argValuesSize,
            uint8_t* argValues)
 {
-    auto rc = OSL::get_rs<RenderState>(ec)->context;
-
-    OSL::journal::Writer jw { rc->journal_buffer };
+    void* buffer = journal_buffer(ec);
+    if (!buffer)
+        return;
+    OSL::journal::Writer jw { buffer };
     jw.record_filefmt(OSL::get_thread_index(ec), OSL::get_shade_index(ec),
                       filename_hash, fmt_specification, arg_count, argTypes,
                       argValuesSize, argValues);
-}
-#elif !defined(__CUDA_ARCH__)
-// On an AMDGPU device the messages are dropped for now: OSL/journal.h is
-// host only, so testshade and testrender --amdgpu-run cannot record them.
-// (On CUDA, cuda/rend_lib.cu defines these.)
-OSL_RSOP OSL_HOSTDEVICE void
-rs_errorfmt(OSL::OpaqueExecContextPtr, OSL::ustringhash, int32_t,
-            const OSL::EncodedType*, uint32_t, uint8_t*)
-{
-}
-
-OSL_RSOP OSL_HOSTDEVICE void
-rs_warningfmt(OSL::OpaqueExecContextPtr, OSL::ustringhash, int32_t,
-              const OSL::EncodedType*, uint32_t, uint8_t*)
-{
-}
-
-OSL_RSOP OSL_HOSTDEVICE void
-rs_printfmt(OSL::OpaqueExecContextPtr, OSL::ustringhash, int32_t,
-            const OSL::EncodedType*, uint32_t, uint8_t*)
-{
-}
-
-OSL_RSOP OSL_HOSTDEVICE void
-rs_filefmt(OSL::OpaqueExecContextPtr, OSL::ustringhash, OSL::ustringhash,
-           int32_t, const OSL::EncodedType*, uint32_t, uint8_t*)
-{
 }
 #endif
