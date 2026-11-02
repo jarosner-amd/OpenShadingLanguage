@@ -40,6 +40,7 @@
 
 #include "amdgpu_artifacts.h"
 #include "test_common/render_state.h"
+#include "hipgridrender.h"
 #include "simplerend.h"
 
 
@@ -91,6 +92,9 @@ static bool output_placement     = true;
 static bool use_optix            = OIIO::Strutil::stoi(
     OIIO::Sysutil::getenv("TESTSHADE_OPTIX"));
 static bool use_amdgpu = false;  // compile for AMDGPU, emit artifacts only
+static bool amdgpu_run = OIIO::Strutil::stoi(  // and run on an AMD GPU
+    OIIO::Sysutil::getenv("TESTSHADE_AMDGPU"));
+static HipGridRenderer* hiprend = nullptr;  // the renderer, with amdgpu_run
 static std::vector<std::string> amdgpu_archs;
 static std::string amdgpu_format;  // "", "bitcode" or "llvmir"
 static bool save_amdgpu                 = false;
@@ -365,9 +369,10 @@ set_shadingsys_options()
     if (texoptions.size())
         shadingsys->texturesys()->attribute("options", texoptions);
 
-    if (use_optix || use_amdgpu) {
+    if (use_optix || (use_amdgpu && !amdgpu_run)) {
         // FIXME: For now, output placement is disabled for OptiX mode, and
-        // nothing is executed in AMDGPU mode.
+        // nothing is executed in AMDGPU mode without --amdgpu-run. On an AMD
+        // GPU the outputs are placed in the GPU renderer's output buffer.
         output_placement = false;
     }
 }
@@ -832,6 +837,8 @@ getargs(int argc, const char* argv[])
       .help("Use OptiX if available");
     ap.arg("--amdgpu", &use_amdgpu)
       .help("Compile for AMDGPU and emit the artifacts, without running the shader");
+    ap.arg("--amdgpu-run", &amdgpu_run)
+      .help("Run the shader on the first AMD GPU (needs a build with OSL_ENABLE_AMDGPU; also the TESTSHADE_AMDGPU environment variable)");
     ap.arg("--amdgpu-arch %L:ARCH", &amdgpu_archs)
       .help("AMDGPU architecture to compile for, e.g. gfx1100 (repeatable; default: one generic artifact, which a build with the device shadeops rejects)");
     ap.arg("--amdgpu-format %s:FORMAT", &amdgpu_format)
@@ -993,6 +1000,18 @@ getargs(int argc, const char* argv[])
         std::cerr << "ERROR: " << message << "\n";
         exit(EXIT_FAILURE);
     };
+    if (amdgpu_run) {
+        // The GPU chooses the architecture, and its outputs only go to
+        // images.
+        if (amdgpu_archs.size() || save_amdgpu
+            || (amdgpu_format.size() && amdgpu_format != "bitcode"))
+            bad_options(
+                "--amdgpu-run cannot be combined with --amdgpu-arch, --save-amdgpu or --amdgpu-format llvmir.");
+        if (print_outputs || entryoutputs.size() || use_shade_image)
+            bad_options(
+                "--amdgpu-run cannot be combined with --print, --entryoutput or --shadeimage.");
+        use_amdgpu = true;
+    }
     if (!use_amdgpu
         && (amdgpu_archs.size() || amdgpu_format.size() || save_amdgpu))
         bad_options(
@@ -1289,7 +1308,9 @@ setup_output_images(SimpleRenderer* rend, ShadingSystem* shadingsys,
                 // The output arena is the start of the first output jbuffer
                 output_base_ptr = outptr;
             }
-            ptrdiff_t offset = outptr - output_base_ptr;
+            // On an AMD GPU, the offset into the GPU renderer's output buffer.
+            ptrdiff_t offset = hiprend ? ptrdiff_t(hiprend->output_offset(i))
+                                       : outptr - output_base_ptr;
             TypeDesc t       = outputvartypes[i];
             symlocs.emplace_back(outputvars[i], t, /*derivs*/ false,
                                  SymArena::Outputs, offset,
@@ -2076,12 +2097,10 @@ synchio()
     fflush(stderr);
 }
 
-// Compile the shader group for AMDGPU and report (and optionally save) the
-// artifacts. Nothing is executed. Returns the process exit code: failure if
-// any error was reported, if no artifact came out, or if an artifact could not
-// be read or written.
-static int
-emit_amdgpu(SimpleRenderer* rend)
+// Optimize the shader group, which for AMDGPU also compiles it into its
+// artifacts. Compile errors go to the renderer's error handler.
+static void
+optimize_for_gpu()
 {
     OSL::PerThreadInfo* thread_info = shadingsys->create_thread_info();
     ShadingContext* ctx             = shadingsys->get_context(thread_info);
@@ -2096,7 +2115,16 @@ emit_amdgpu(SimpleRenderer* rend)
     // it before looking at the error count.
     shadingsys->release_context(ctx);
     shadingsys->destroy_thread_info(thread_info);
+}
 
+// Compile the shader group for AMDGPU and report (and optionally save) the
+// artifacts. Nothing is executed. Returns the process exit code: failure if
+// any error was reported, if no artifact came out, or if an artifact could not
+// be read or written.
+static int
+emit_amdgpu(SimpleRenderer* rend)
+{
+    optimize_for_gpu();
     bool ok = (rend->num_errors() == 0);
 
     int num_artifacts = 0;
@@ -2137,16 +2165,36 @@ test_shade(int argc, const char* argv[])
     }
 
     std::unique_ptr<SimpleRenderer> rend;
+    hiprend = nullptr;
 #if OSL_USE_OPTIX
     if (use_optix)
         rend.reset(new OptixGridRenderer);
     else
 #endif
+        if (amdgpu_run)
+        rend.reset(hiprend = new HipGridRenderer);
+    else
         rend.reset(new SimpleRenderer);
 
     // Other renderer and global options
     if (debug1 || verbose)
         rend->errhandler().verbosity(ErrorHandler::VERBOSE);
+
+    if (hiprend) {
+        // Choose the GPU before the ShadingSystem exists: its architecture
+        // is the one to compile for (set_shadingsys_options).
+        std::string error;
+        std::string arch = hiprend->run(error);
+        if (arch.empty()) {
+            std::cerr << "ERROR: --amdgpu-run: " << error << "\n";
+            return EXIT_FAILURE;
+        }
+        // Only with --debug: the testsuite compares testshade's output, even
+        // with -v.
+        if (debug1)
+            print("testshade: running on an AMD GPU ({})\n", arch);
+        amdgpu_archs = { arch };
+    }
 
 #if OSL_USE_OPTIX
     rend->attribute("saveptx", (int)saveptx);
@@ -2324,7 +2372,7 @@ test_shade(int argc, const char* argv[])
     // Set up the image outputs requested on the command line
     setup_output_images(rend.get(), shadingsys, shadergroup);
 
-    if (use_amdgpu) {
+    if (use_amdgpu && !amdgpu_run) {
         // Compile only: no images, no shading loop.
         int retcode = emit_amdgpu(rend.get());
         rend->clear();
@@ -2347,6 +2395,19 @@ test_shade(int argc, const char* argv[])
     OIIO::attribute("threads", num_threads);
 
     synchio();
+
+    if (hiprend) {
+        // Compile the group for the GPU, and fill each point's
+        // ShaderGlobals as shade_region() does on the CPU.
+        optimize_for_gpu();
+        raytype_bit = shadingsys->raytype_bit(ustring(raytype_name));
+        hiprend->set_globals_setup([](ShaderGlobals& sg, int x, int y) {
+            static RenderState renderState;
+            static StackClosurePool closure_pool;
+            setup_shaderglobals(sg, shadingsys, renderState, &closure_pool, x,
+                                y);
+        });
+    }
 
     rend->prepare_render();
     if (use_rs_bitcode) {
@@ -2389,7 +2450,7 @@ test_shade(int argc, const char* argv[])
     for (int iter = 0; iter < iters; ++iter) {
         OIIO::ROI roi(0, xres, 0, yres);
 
-        if (use_optix) {
+        if (use_optix || hiprend) {
             rend->render(xres, yres);
         } else if (use_shade_image) {
             // TODO: do we need a batched option/version of shade_image?
@@ -2581,6 +2642,8 @@ test_shade(int argc, const char* argv[])
 
     delete shadingsys;
     int retcode = EXIT_SUCCESS;
+    if (hiprend && !hiprend->ok())
+        retcode = EXIT_FAILURE;  // the error was reported already
 
     // Double check that there were no uncaught errors in the texture
     // system and image cache.
