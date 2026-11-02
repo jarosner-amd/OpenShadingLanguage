@@ -225,9 +225,12 @@ Each point's globals (`u`, `v`, `P` and their derivatives) are set as on
 the CPU, so `--center`, `--scaleuv`, `--offsetuv`, `--raytype` and the
 `--vary_*` options work, and so do interactive parameters with `--reparam`.
 Textures are GPU textures, as in testrender: close to the CPU's lookups,
-not identical. Not supported yet: printf, error and warning messages
-(dropped on the GPU), userdata, and the options `--print`, `--entryoutput`
-and `--shadeimage`. With
+not identical. The shaders' `printf`, `fprintf`, `error` and `warning`
+messages go to a journal on the GPU, as they go to one on the CPU, and come
+out in grid-point order. Each launch (up to 65,536 points) has its own
+journal, with 1 KB for each point plus `--jbufferMB` megabytes for longer
+output. Not supported yet: userdata, and the options `--print`,
+`--entryoutput` and `--shadeimage`. With
 `-DOSL_TEST_AMDGPU_RUN=ON`, every test with an `AMDGPU` marker file in its
 testsuite folder also runs this way, as `<test>.amdgpu` and
 `<test>.amdgpu.opt`; they share the CPU's reference images.

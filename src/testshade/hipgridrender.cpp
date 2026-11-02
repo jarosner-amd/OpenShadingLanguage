@@ -11,6 +11,7 @@
 #include <OpenImageIO/imagebuf.h>
 #include <OpenImageIO/strutil.h>
 
+#include <OSL/journal.h>
 #include <OSL/oslexec.h>
 
 #ifdef OSL_TESTSHADE_HIP
@@ -40,6 +41,11 @@ struct HipGridRenderer::Device {
     char* uniform         = nullptr;  // the shading-state block
     char* identity        = nullptr;  // an identity Matrix44
     char* outputs         = nullptr;  // every output, at output_offset()
+    void* context_journal = nullptr;  // the journal the RenderContext has
+    // The journal of a launch (see set_journal()) and its copy on the host.
+    char* journal       = nullptr;
+    size_t journal_size = 0;
+    std::vector<uint8_t> journal_host;
     // Device copies of the transforms the ShaderGlobals point to.
     std::vector<std::pair<const void*, char*>> xforms;
     // One chunk of grid points (see render()) and its copy on the host.
@@ -55,6 +61,10 @@ static_assert(sizeof(StackClosurePool) == 1024 + sizeof(void*),
 // Points per launch: bounds the device memory of a large grid (about 1.5 KB
 // per point, plus the group data).
 static constexpr int k_chunk_points = 65536;
+
+// The journal page of a grid point: as testshade's CPU journal pages, so
+// that a message that fits there fits here too.
+static constexpr uint32_t k_journal_page = 1024;
 
 #else
 
@@ -78,7 +88,7 @@ HipGridRenderer::~HipGridRenderer()
         for (auto& x : m_dev->xforms)
             m_hip->free(x.second);
         for (char* p : { m_dev->context, m_dev->uniform, m_dev->identity,
-                         m_dev->outputs, m_dev->chunk })
+                         m_dev->outputs, m_dev->chunk, m_dev->journal })
             m_hip->free(p);
     }
 #endif
@@ -151,6 +161,18 @@ HipGridRenderer::build_module(const std::vector<char>&, const std::string&)
 
 bool
 HipGridRenderer::init_device()
+{
+    return false;
+}
+
+bool
+HipGridRenderer::upload_context(void*)
+{
+    return false;
+}
+
+bool
+HipGridRenderer::read_journal()
 {
     return false;
 }
@@ -327,17 +349,61 @@ HipGridRenderer::init_device()
     d.uniform  = (char*)hip.alloc(size_t(size));
     d.identity = (char*)hip.alloc(sizeof(Matrix44));
     d.outputs  = (char*)hip.alloc(m_outputs_size ? m_outputs_size : 256);
-    RenderContext rc {};
-    export_context(rc);
-    rc.journal_buffer = nullptr;  // messages are dropped on the GPU
     Matrix44 identity;
     identity.makeIdentity();
     if (!d.context || !d.uniform || !d.identity || !d.outputs
-        || !hip.to_device(d.context, &rc, sizeof(rc))
         || !hip.to_device(d.uniform, block, size_t(size))
         || !hip.to_device(d.identity, &identity, sizeof(identity))
         || !hip.fill(d.outputs, 0, m_outputs_size ? m_outputs_size : 256))
         return fail(hip.error());
+    return upload_context(nullptr);  // no journal until render() has one
+}
+
+
+
+// The device RenderContext, with a device journal or none (null).
+bool
+HipGridRenderer::upload_context(void* journal)
+{
+    RenderContext rc {};
+    export_context(rc);
+    rc.journal_buffer = journal;
+    shadingsys->getattribute("max_warnings_per_thread",
+                             rc.max_warnings_per_thread);
+    if (!m_hip->to_device(m_dev->context, &rc, sizeof(rc)))
+        return fail(m_hip->error());
+    m_dev->context_journal = journal;
+    return true;
+}
+
+
+
+// After a launch: copy back the bookkeeping of the journal and, if any
+// message was recorded (or did not fit), the journal itself for the reader.
+bool
+HipGridRenderer::read_journal()
+{
+    using journal::pvt::Organization;
+    using journal::pvt::PageInfo;
+    Device& d                 = *m_dev;
+    uint8_t* jh               = d.journal_host.data();
+    const Organization& org   = *reinterpret_cast<const Organization*>(jh);
+    const uint32_t first_free = org.free_pos.load();
+    if (!m_hip->to_host(jh, d.journal, org.calc_end_of_page_infos()))
+        return fail(m_hip->error());
+    bool written         = org.free_pos.load() != first_free
+                           || org.additional_bytes_required.load()
+                           || org.exceeded_page_size.load();
+    const PageInfo* info = reinterpret_cast<const PageInfo*>(
+        jh + sizeof(Organization));
+    for (int t = 0; t < org.thread_count && !written; ++t)
+        written = info[t].remaining != org.page_size;
+    if (!written)
+        return true;
+    if (!m_hip->to_host(jh, d.journal,
+                        std::min(org.free_pos.load(), org.buf_size)))
+        return fail(m_hip->error());
+    m_journal_reader(jh);
     return true;
 }
 
@@ -354,8 +420,9 @@ HipGridRenderer::warmup()
 // The grid in chunks of up to k_chunk_points points, one launch each. A
 // chunk's device memory holds, for every point, its ShaderGlobals, closure
 // pool, RenderState and group data; the ShaderGlobals are filled as on the
-// CPU, then their pointers are made device pointers. Nothing comes back: the
-// outputs stay in the device output buffer until finalize_pixel_buffer().
+// CPU, then their pointers are made device pointers. The outputs stay in the
+// device output buffer until finalize_pixel_buffer(); only the journal, if
+// there is a reader, comes back after each launch.
 void
 HipGridRenderer::render(int xres, int yres)
 {
@@ -388,6 +455,37 @@ HipGridRenderer::render(int xres, int yres)
         d.staging.assign(chunk_bytes, 0);
     }
 
+    // The journal: its bookkeeping, a first page for each grid point, and
+    // the pool for more pages.
+    const bool journal   = bool(m_journal_reader);
+    size_t journal_bytes = 0;
+    if (journal) {
+        journal_bytes
+            = sizeof(journal::pvt::Organization)
+              + points * (sizeof(journal::pvt::PageInfo) + k_journal_page)
+              + m_journal_pool;
+        if (journal_bytes > 0xffffffffu) {
+            fail("the journal of a launch must be less than 4 GB");
+            return;
+        }
+        if (journal_bytes > d.journal_size) {
+            if (d.context_journal && !upload_context(nullptr))
+                return;
+            hip.free(d.journal);
+            d.journal      = (char*)hip.alloc(journal_bytes);
+            d.journal_size = d.journal ? journal_bytes : 0;
+            if (!d.journal) {
+                fail(hip.error());
+                return;
+            }
+            d.journal_host.assign(journal_bytes, 0);
+        }
+    }
+    void* context_journal = journal ? d.journal : nullptr;
+    if (d.context_journal != context_journal
+        && !upload_context(context_journal))
+        return;
+
     // The device copy of a transform the ShaderGlobals point to (one copy
     // for each distinct host matrix), or the identity for none.
     auto device_xform = [&](TransformationPtr host) -> TransformationPtr {
@@ -419,7 +517,7 @@ HipGridRenderer::render(int xres, int yres)
             sg.renderer            = nullptr;
             sg.shadingStateUniform = d.uniform;
             sg.Ci                  = nullptr;
-            sg.thread_index        = 0;
+            sg.thread_index        = i;  // its journal thread
             sg.shade_index         = index;
             sg.shader2common       = device_xform(sg.shader2common);
             sg.object2common       = device_xform(sg.object2common);
@@ -450,11 +548,24 @@ HipGridRenderer::render(int xres, int yres)
         int kernel_n              = n;
         void* args[] = { &kernel_sgs, &sg_str,      &kernel_gds,   &gd_str,
                          &outputs,    &interactive, &kernel_first, &kernel_n };
+        if (journal) {
+            uint8_t* jh = d.journal_host.data();
+            journal::initialize_buffer(jh, uint32_t(journal_bytes),
+                                       k_journal_page, n);
+            const auto& org = *reinterpret_cast<journal::pvt::Organization*>(
+                jh);
+            if (!hip.to_device(d.journal, jh, org.calc_end_of_page_infos())) {
+                fail(hip.error());
+                return;
+            }
+        }
         if (!hip.to_device(d.chunk, stage, chunk_bytes)
             || !hip.launch(d.kernel, unsigned((n + 63) / 64), 64, args)) {
             fail(hip.error());
             return;
         }
+        if (journal && !read_journal())
+            return;
     }
     m_rendered = true;
 }
