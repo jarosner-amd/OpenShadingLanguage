@@ -2359,6 +2359,27 @@ test_shade(int argc, const char* argv[])
     //Send the populated Journal Buffer to the renderer
     theRenderContext.journal_buffer = jbuffer.get();
 
+    //Just to match existing behavior we extract the current error_repeats attribute but intent is for renderers to make
+    //their own decision about this.
+    int error_repeats;
+    shadingsys->getattribute("error_repeats", error_repeats);
+    bool limit_errors                  = !error_repeats;
+    bool limit_warnings                = !error_repeats;
+    const int error_history_capacity   = 25;
+    const int warning_history_capacity = 25;
+
+    journal::TrackRecentlyReported tracker_error_warnings(
+        limit_errors, error_history_capacity, limit_warnings,
+        warning_history_capacity);
+    TestshadeReporter reporter(&rend->errhandler(), tracker_error_warnings);
+
+    // On an AMD GPU, every launch has its own journal (with a journal thread
+    // for each grid point), which is read right after the launch.
+    if (hiprend)
+        hiprend->set_journal(jbuffer_bytes, [&](const uint8_t* journal) {
+            OSL::journal::Reader(journal, reporter).process();
+        });
+
 
     // Allow a settable number of iterations to "render" the whole image,
     // which is useful for time trials of things that would be too quick
@@ -2427,19 +2448,6 @@ test_shade(int argc, const char* argv[])
         }
     }
 
-    //Just to match existing behavior we extract the current error_repeats attribute but intent is for renderers to make
-    //their own decision about this.
-    int error_repeats;
-    shadingsys->getattribute("error_repeats", error_repeats);
-    bool limit_errors                  = !error_repeats;
-    bool limit_warnings                = !error_repeats;
-    const int error_history_capacity   = 25;
-    const int warning_history_capacity = 25;
-
-    journal::TrackRecentlyReported tracker_error_warnings(
-        limit_errors, error_history_capacity, limit_warnings,
-        warning_history_capacity);
-    TestshadeReporter reporter(&rend->errhandler(), tracker_error_warnings);
     OSL::journal::Reader jreader(jbuffer.get(), reporter);
     jreader.process();
     // Need to call journal::initialize_buffer before re-using the jbuffer
