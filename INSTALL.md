@@ -214,6 +214,23 @@ dropped.
 The test `amdgpu-run-testrender` compares such renders with the CPU's; it
 needs an AMD GPU, so it only runs with `-DOSL_TEST_AMDGPU_RUN=ON`.
 
+In the same build, `testshade --amdgpu-run` (or the environment variable
+`TESTSHADE_AMDGPU=1`) runs the shader on an AMD GPU, a GPU thread for each
+point of the grid, and writes the `-o` output images as the CPU does:
+
+    testshade --amdgpu-run -g 64 64 -o Cout out.exr myshader
+
+It chooses the GPU and loads the HIP runtime and hiprtc as testrender does.
+Each point's globals (`u`, `v`, `P` and their derivatives) are set as on
+the CPU, so `--center`, `--scaleuv`, `--offsetuv`, `--raytype` and the
+`--vary_*` options work, and so do interactive parameters with `--reparam`.
+Not supported yet: printf, error and warning messages (dropped on the GPU),
+textures (a lookup reports a missing texture), userdata, and the options
+`--print`, `--entryoutput` and `--shadeimage`. With
+`-DOSL_TEST_AMDGPU_RUN=ON`, every test with an `AMDGPU` marker file in its
+testsuite folder also runs this way, as `<test>.amdgpu` and
+`<test>.amdgpu.opt`; they share the CPU's reference images.
+
 This needs LLVM 19 or newer with the AMDGPU target, and one of two builds:
 
 * With `USE_LLVM_BITCODE=OFF` (the default on Windows), nothing more is
