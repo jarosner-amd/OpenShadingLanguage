@@ -224,9 +224,10 @@ It chooses the GPU and loads the HIP runtime and hiprtc as testrender does.
 Each point's globals (`u`, `v`, `P` and their derivatives) are set as on
 the CPU, so `--center`, `--scaleuv`, `--offsetuv`, `--raytype` and the
 `--vary_*` options work, and so do interactive parameters with `--reparam`.
-Not supported yet: printf, error and warning messages (dropped on the GPU),
-textures (a lookup reports a missing texture), userdata, and the options
-`--print`, `--entryoutput` and `--shadeimage`. With
+Textures are GPU textures, as in testrender: close to the CPU's lookups,
+not identical. Not supported yet: printf, error and warning messages
+(dropped on the GPU), userdata, and the options `--print`, `--entryoutput`
+and `--shadeimage`. With
 `-DOSL_TEST_AMDGPU_RUN=ON`, every test with an `AMDGPU` marker file in its
 testsuite folder also runs this way, as `<test>.amdgpu` and
 `<test>.amdgpu.opt`; they share the CPU's reference images.

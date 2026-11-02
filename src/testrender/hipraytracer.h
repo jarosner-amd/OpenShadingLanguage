@@ -14,6 +14,7 @@
 
 OSL_NAMESPACE_BEGIN
 
+class AmdgpuTextures;
 class HipRuntime;
 
 // The AMDGPU side of testrender. Without run(), it compiles every shader
@@ -81,14 +82,6 @@ private:
                            ClosureColor*& ci);
     bool init_device();
     bool fail(string_view message);
-    // A texture on the GPU: the device GpuTexture (the handle OSL passes
-    // on) and the two texture objects it refers to.
-    struct TextureRecord {
-        void* device     = nullptr;
-        void* object     = nullptr;
-        void* env_object = nullptr;
-    };
-    TextureRecord load_texture(ustring filename);
 
     bool m_save = false;
     bool m_ok   = true;
@@ -98,9 +91,8 @@ private:
     std::unique_ptr<Device> m_dev;
     std::unordered_map<const ShaderGroup*, std::unique_ptr<GpuGroup>> m_groups;
     std::mutex m_mutex;  // one GPU shading call at a time
-    // Per file: the device GpuTexture (the handle) and its texture object.
-    std::unordered_map<ustring, TextureRecord> m_textures;
-    std::mutex m_textures_mutex;
+    // The GPU textures, by file (shared with testshade).
+    std::unique_ptr<AmdgpuTextures> m_textures;
 };
 
 OSL_NAMESPACE_END

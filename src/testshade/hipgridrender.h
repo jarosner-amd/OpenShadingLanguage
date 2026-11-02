@@ -13,6 +13,7 @@
 
 OSL_NAMESPACE_BEGIN
 
+class AmdgpuTextures;
 class HipRuntime;
 
 // testshade's grid on an AMD GPU (testshade --amdgpu-run): the shader group
@@ -22,7 +23,8 @@ class HipRuntime;
 // returns, and output placement: the outputs' symbol locations are offsets
 // into one device buffer (output_offset()). Needs a build with
 // OSL_ENABLE_AMDGPU; printf, error and warning messages are dropped on the
-// GPU, and there is no userdata.
+// GPU, and there is no userdata. Textures are GPU textures
+// (AmdgpuTextures), which filter like the GPU's texture units.
 class HipGridRenderer final : public SimpleRenderer {
 public:
     HipGridRenderer();
@@ -57,6 +59,10 @@ public:
     // False once anything failed; the error went to errhandler().
     bool ok() const { return m_ok; }
 
+    using SimpleRenderer::get_texture_handle;
+    TextureHandle* get_texture_handle(ustring filename, ShadingContext* context,
+                                      const TextureOpt* options) override;
+
     void* device_alloc(size_t size) override;
     void device_free(void* ptr) override;
     void* copy_to_device(void* dst_device, const void* src_host,
@@ -72,6 +78,7 @@ private:
 
     std::unique_ptr<HipRuntime> m_hip;
     std::unique_ptr<Device> m_dev;
+    std::unique_ptr<AmdgpuTextures> m_textures;
     std::string m_arch;
     GlobalsSetup m_setup;
     std::vector<size_t> m_output_offsets;
