@@ -6,7 +6,8 @@
 set ( testshade_srcs
       testshade.cpp
       simplerend.cpp
-      amdgpu_artifacts.cpp )
+      amdgpu_artifacts.cpp
+      hipgridrender.cpp )
 
 if (OSL_BUILD_BATCHED)
     list(APPEND testshade_srcs
@@ -76,6 +77,13 @@ list(APPEND include_dirs ${OpenImageIO_INCLUDES})
 
 EMBED_LLVM_BITCODE_IN_CPP ( "${rs_srcs}" "_host" "testshade_llvm_compiled_rs" testshade_srcs "-DOSL_HOST_RS_BITCODE=1" "${include_dirs}")
 
+if (OSL_ENABLE_AMDGPU)
+    # testshade --amdgpu-run: the renderer services as embedded AMDGPU
+    # bitcode, linked with the shader group at run time, and the HIP loader
+    # (src/cmake/hip_macros.cmake).
+    EMBED_AMDGPU_REND_LIB (testshade testshade_srcs)
+endif ()
+
 add_executable ( testshade ${testshade_srcs} testshademain.cpp )
 
 target_include_directories (testshade BEFORE PRIVATE ${OpenImageIO_INCLUDES})
@@ -86,6 +94,18 @@ target_link_libraries (testshade
 if (OSL_USE_OPTIX)
     add_dependencies(testshade testshade_ptx)
 endif ()
+
+# The HIP headers only: the HIP runtime and hiprtc are loaded at run time.
+macro (testshade_amdgpu_target target)
+    if (OSL_ENABLE_AMDGPU)
+        target_include_directories (${target} PRIVATE
+                                    ${CMAKE_CURRENT_SOURCE_DIR}
+                                    "${ROCM_PATH}/include")
+        target_compile_definitions (${target} PRIVATE OSL_TESTSHADE_HIP=1
+                                    __HIP_PLATFORM_AMD__=1)
+    endif ()
+endmacro ()
+testshade_amdgpu_target (testshade)
 
 install (TARGETS testshade RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} )
 
@@ -122,6 +142,7 @@ if (NOT CODECOV)
                            PRIVATE
                                oslexec oslquery oslcomp)
     target_include_directories (libtestshade BEFORE PRIVATE ${OpenImageIO_INCLUDES})
+    testshade_amdgpu_target (libtestshade)
     set_target_properties (libtestshade PROPERTIES PREFIX "")
 
     install_targets ( libtestshade )
