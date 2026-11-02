@@ -68,7 +68,8 @@ else :
 
 refdir = "ref/"
 mytest = os.path.split(os.path.abspath(os.getcwd()))[-1]
-if str(mytest).endswith('.opt') or str(mytest).endswith('.optix') :
+if (str(mytest).endswith('.opt') or str(mytest).endswith('.optix')
+        or str(mytest).endswith('.amdgpu')) :
     mytest = mytest.split('.')[0]
 test_source_dir = os.getenv('OSL_TESTSUITE_SRC',
                             os.path.join(OSL_TESTSUITE_ROOT, mytest))

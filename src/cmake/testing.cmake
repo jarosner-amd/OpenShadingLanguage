@@ -130,6 +130,12 @@ macro (add_one_testsuite testname testsrcdir)
             set_property (TEST ${testname} APPEND PROPERTY ENVIRONMENT OSL_TESTSUITE_THRESH_SCALE=$ENV{OSL_TESTSUITE_OPTIX_THRESH_SCALE})
         endif ()
     endif ()
+    if (${testname} MATCHES "\\.amdgpu")
+        set_property (TEST ${testname} APPEND PROPERTY LABELS amdgpu)
+        if (DEFINED ENV{OSL_TESTSUITE_AMDGPU_THRESH_SCALE})
+            set_property (TEST ${testname} APPEND PROPERTY ENVIRONMENT OSL_TESTSUITE_THRESH_SCALE=$ENV{OSL_TESTSUITE_AMDGPU_THRESH_SCALE})
+        endif ()
+    endif ()
     if (${testname} MATCHES "-reg")
         # These are batched shading regression tests. Some are quite
         # long, so give them a higher cost and timeout.
@@ -232,6 +238,24 @@ macro ( TESTSUITE )
               add_one_testsuite ("${_testname}.optix.fused" "${_testsrcdir}"
                                  ENV TESTSHADE_OPT=2 TESTSHADE_OPTIX=1 TESTSHADE_FUSED=1 )
             endif()
+        endif ()
+
+        # When the tests that need an AMD GPU are enabled, also run
+        # testshade on the GPU (testshade --amdgpu-run) if there is an AMDGPU
+        # marker file in the directory.
+        if (OSL_ENABLE_AMDGPU AND OSL_TEST_AMDGPU_RUN
+            AND EXISTS "${_testsrcdir}/AMDGPU"
+            AND NOT EXISTS "${_testsrcdir}/BATCHED_REGRESSION")
+            # Unoptimized
+            if (NOT EXISTS "${_testsrcdir}/OPTIMIZEONLY")
+                add_one_testsuite ("${_testname}.amdgpu" "${_testsrcdir}"
+                                   ENV TESTSHADE_OPT=0 TESTSHADE_AMDGPU=1
+                                       HIP_PATH=${ROCM_PATH} )
+            endif ()
+            # and optimized
+            add_one_testsuite ("${_testname}.amdgpu.opt" "${_testsrcdir}"
+                               ENV TESTSHADE_OPT=2 TESTSHADE_AMDGPU=1
+                                   HIP_PATH=${ROCM_PATH} )
         endif ()
 
         if (OSL_BUILD_BATCHED)
