@@ -261,8 +261,10 @@ macro ( TESTSUITE )
         if (OSL_ENABLE_AMDGPU AND OSL_TEST_AMDGPU_RUN
             AND EXISTS "${_testsrcdir}/AMDGPU"
             AND NOT EXISTS "${_testsrcdir}/BATCHED_REGRESSION")
-            # Unoptimized
-            if (NOT EXISTS "${_testsrcdir}/OPTIMIZEONLY")
+            # Unoptimized (AMDGPU_OPTIMIZEONLY: the GPU needs the optimizer,
+            # for example to make a texture file name constant)
+            if (NOT EXISTS "${_testsrcdir}/OPTIMIZEONLY"
+                AND NOT EXISTS "${_testsrcdir}/AMDGPU_OPTIMIZEONLY")
                 add_one_testsuite ("${_testname}.amdgpu" "${_testsrcdir}"
                                    ENV TESTSHADE_OPT=0 TESTSHADE_AMDGPU=1
                                        HIP_PATH=${ROCM_PATH} )
