@@ -926,6 +926,10 @@ getargs(int argc, const char* argv[])
         if (print_outputs || entryoutputs.size() || use_shade_image)
             bad_options(
                 "--amdgpu-run cannot be combined with --print, --entryoutput or --shadeimage.");
+        // The GPU has the userdata that testshade computes from the shading
+        // point (rs_get_userdata), not a list from the command line.
+        if (userdata.size())
+            bad_options("--amdgpu-run cannot be combined with --userdata.");
         use_amdgpu = true;
     }
     if (!use_amdgpu

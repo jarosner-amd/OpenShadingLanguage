@@ -229,8 +229,11 @@ not identical. The shaders' `printf`, `fprintf`, `error` and `warning`
 messages go to a journal on the GPU, as they go to one on the CPU, and come
 out in grid-point order. Each launch (up to 65,536 points) has its own
 journal, with 1 KB for each point plus `--jbufferMB` megabytes for longer
-output. Not supported yet: userdata, and the options `--print`,
-`--entryoutput` and `--shadeimage`. With
+output. `getattribute()` and userdata reach the renderer through
+`rs_get_attribute` and `rs_get_userdata` (`OSL/rs_free_function.h`); the GPU
+has testshade's userdata that comes from the shading point (`s`, `t` and the
+like), not `--userdata` from the command line. Not supported yet: the
+options `--userdata`, `--print`, `--entryoutput` and `--shadeimage`. With
 `-DOSL_TEST_AMDGPU_RUN=ON`, every test with an `AMDGPU` marker file in its
 testsuite folder also runs this way, as `<test>.amdgpu` and
 `<test>.amdgpu.opt`; they share the CPU's reference images.
