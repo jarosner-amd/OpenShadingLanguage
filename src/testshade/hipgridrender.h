@@ -22,7 +22,8 @@ class HipRuntime;
 // ShadingSystem must have gpu_backend "amdgpu", the architecture that run()
 // returns, and output placement: the outputs' symbol locations are offsets
 // into one device buffer (output_offset()). Needs a build with
-// OSL_ENABLE_AMDGPU; there is no userdata. Textures are GPU textures
+// OSL_ENABLE_AMDGPU; userdata comes from rs_get_userdata (rs_simplerend.cpp),
+// not from --userdata. Textures are GPU textures
 // (AmdgpuTextures), which filter like the GPU's texture units.
 class HipGridRenderer final : public SimpleRenderer {
 public:

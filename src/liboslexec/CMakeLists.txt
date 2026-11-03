@@ -258,6 +258,7 @@ if (USE_LLVM_BITCODE)
         # the rs_* functions, which the renderer links in itself.
         set (amdgpu_shadeops_srcs
             ${CMAKE_SOURCE_DIR}/src/liboslexec/llvm_ops.cpp
+            ${CMAKE_SOURCE_DIR}/src/liboslexec/opattribute.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opclosure.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opcolor.cpp
             ${CMAKE_SOURCE_DIR}/src/liboslexec/opfmt.cpp
