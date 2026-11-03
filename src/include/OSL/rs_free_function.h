@@ -303,6 +303,25 @@ rs_pointcloud_write(OSL::OpaqueExecContextPtr oec, OSL::ustringhash filename,
                     const OSL::ustringhash* names, const OSL::TypeDesc* types,
                     const void** data);
 
+/// Get the named attribute of the named object (empty for the object being
+/// shaded), of the given type, into result: one value, or three (value,
+/// x and y derivatives) when derivatives is true. index is the array
+/// element for getattribute() with an index, and -1 otherwise. Return true
+/// if the attribute was found. Keep in sync with
+/// RendererServices::get_attribute and get_array_attribute.
+OSL_RSOP OSL_HOSTDEVICE bool
+rs_get_attribute(OSL::OpaqueExecContextPtr oec, OSL::ustringhash object,
+                 OSL::ustringhash name, OSL::TypeDesc type, bool derivatives,
+                 int index, void* result);
+
+/// Get the named userdata (primitive variable) of the point being shaded,
+/// of the given type, into result: one value, or three (value, x and y
+/// derivatives) when derivatives is true. Return true if it was found.
+/// Keep in sync with RendererServices::get_userdata.
+OSL_RSOP OSL_HOSTDEVICE bool
+rs_get_userdata(OSL::OpaqueExecContextPtr oec, OSL::ustringhash name,
+                OSL::TypeDesc type, bool derivatives, void* result);
+
 /// Immediately trace a ray from P in the direction R.  Return true
 /// if anything hit, otherwise false.
 OSL_RSOP OSL_HOSTDEVICE bool

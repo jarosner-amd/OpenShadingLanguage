@@ -568,14 +568,11 @@ rs_get_shade_index(OSL::OpaqueExecContextPtr oec, void* result)
 }
 
 OSL_RSOP OSL_HOSTDEVICE bool
-rs_get_attribute(OSL::OpaqueExecContextPtr oec, OSL::ustringhash_pod object_,
-                 OSL::ustringhash_pod name_, OSL::TypeDesc_pod _type,
-                 bool derivatives, int index, void* result)
+rs_get_attribute(OSL::OpaqueExecContextPtr oec, OSL::ustringhash object,
+                 OSL::ustringhash name, OSL::TypeDesc type, bool derivatives,
+                 int index, void* result)
 {
-    auto object              = OSL::ustringhash_from(object_);
-    auto name                = OSL::ustringhash_from(name_);
-    const OSL::TypeDesc type = OSL::TypeDesc_from(_type);
-    auto rc                  = OSL::get_rs<RenderState>(oec)->context;
+    auto rc = OSL::get_rs<RenderState>(oec)->context;
 
     // The many branches in the code below handle the case where we don't know
     // the attribute name at compile time. In the case it is known, dead-code

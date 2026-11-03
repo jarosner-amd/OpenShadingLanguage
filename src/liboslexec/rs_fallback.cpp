@@ -292,6 +292,35 @@ rs_pointcloud_write(OSL::OpaqueExecContextPtr exec_ctx,
 }
 
 OSL_RSOP OSL_HOSTDEVICE bool
+rs_get_attribute(OSL::OpaqueExecContextPtr exec_ctx, OSL::ustringhash object,
+                 OSL::ustringhash name, OSL::TypeDesc type, bool derivatives,
+                 int index, void* result)
+{
+#ifndef __CUDA_ARCH__
+    auto sg = get_sg(exec_ctx);
+    if (index < 0)
+        return sg->renderer->get_attribute(sg, derivatives, object, type, name,
+                                           result);
+    return sg->renderer->get_array_attribute(sg, derivatives, object, type,
+                                             name, index, result);
+#else
+    return false;
+#endif
+}
+
+OSL_RSOP OSL_HOSTDEVICE bool
+rs_get_userdata(OSL::OpaqueExecContextPtr exec_ctx, OSL::ustringhash name,
+                OSL::TypeDesc type, bool derivatives, void* result)
+{
+#ifndef __CUDA_ARCH__
+    auto sg = get_sg(exec_ctx);
+    return sg->renderer->get_userdata(derivatives, name, type, sg, result);
+#else
+    return false;
+#endif
+}
+
+OSL_RSOP OSL_HOSTDEVICE bool
 rs_trace(OSL::OpaqueExecContextPtr exec_ctx, OSL::TraceOpt& options,
          const OSL::Vec3& P, const OSL::Vec3& dPdx, const OSL::Vec3& dPdy,
          const OSL::Vec3& R, const OSL::Vec3& dRdx, const OSL::Vec3& dRdy)
