@@ -622,16 +622,10 @@ rs_get_attribute(OSL::OpaqueExecContextPtr oec, OSL::ustringhash object,
         && type == OSL::TypeFloat)
         return rs_get_attribute_constant_float(3.14159f, derivatives, result);
 
-#if !OSL_GPU_DEVICE_COMPILE
-    if (object.empty()) {
-        // TODO: implement a true free function version of rs_get_userdata
-        // that only uses data from RenderState.  Because that isn't done
-        // yet, for host only compilation we break encapsulation and cast
-        // to gain access to the virtual RendererServices.
-        auto sg = reinterpret_cast<OSL::ShaderGlobals*>(oec);
-        return sg->renderer->get_userdata(derivatives, name, type, sg, result);
-    }
-#endif
+    // If no named attribute was found, allow userdata to bind to the
+    // attribute request.
+    if (object.empty())
+        return rs_get_userdata(oec, name, type, derivatives, result);
 
     return false;
 }
@@ -708,6 +702,37 @@ rs_get_interpolated_blue(OSL::OpaqueExecContextPtr ec, bool derivatives,
         return true;
     }
     return false;
+}
+
+OSL_RSOP OSL_HOSTDEVICE bool
+rs_get_userdata(OSL::OpaqueExecContextPtr oec, OSL::ustringhash name,
+                OSL::TypeDesc type, bool derivatives, void* result)
+{
+#if !OSL_GPU_DEVICE_COMPILE
+    // On the host, SimpleRenderer::get_userdata also has the userdata given
+    // on the command line, so break encapsulation and cast to gain access to
+    // the virtual RendererServices.
+    auto sg = reinterpret_cast<OSL::ShaderGlobals*>(oec);
+    return sg->renderer->get_userdata(derivatives, name, type, sg, result);
+#else
+    // On a GPU, the userdata that SimpleRenderer::get_userdata computes from
+    // the shading point; userdata given on the command line is host only.
+    if (name == RS::Hashes::face_idx && type == OSL::TypeInt)
+        return rs_get_interpolated_face_idx(oec, result);
+    if (type == OSL::TypeFloat) {
+        if (name == RS::Hashes::s)
+            return rs_get_interpolated_s(oec, derivatives, result);
+        if (name == RS::Hashes::t)
+            return rs_get_interpolated_t(oec, derivatives, result);
+        if (name == RS::Hashes::red)
+            return rs_get_interpolated_red(oec, derivatives, result);
+        if (name == RS::Hashes::green)
+            return rs_get_interpolated_green(oec, derivatives, result);
+        if (name == RS::Hashes::blue)
+            return rs_get_interpolated_blue(oec, derivatives, result);
+    }
+    return false;
+#endif
 }
 
 OSL_RSOP OSL_HOSTDEVICE bool
