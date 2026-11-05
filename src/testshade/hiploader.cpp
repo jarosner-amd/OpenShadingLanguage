@@ -22,6 +22,8 @@ OSL_NAMESPACE_BEGIN
 // a macro for the versioned entry point.
 struct HipRuntime::Api {
     hipError_t (*Malloc)(void**, size_t)                     = nullptr;
+    hipError_t (*HostMalloc)(void**, size_t, unsigned)       = nullptr;
+    decltype(&::hipHostFree) HostFree                        = nullptr;
     hipError_t (*GetDeviceProperties)(hipDeviceProp_t*, int) = nullptr;
     decltype(&::hipFree) Free                                = nullptr;
     decltype(&::hipMemcpy) Memcpy                            = nullptr;
@@ -34,6 +36,11 @@ struct HipRuntime::Api {
     decltype(&::hipModuleUnload) ModuleUnload                = nullptr;
     decltype(&::hipModuleGetFunction) ModuleGetFunction      = nullptr;
     decltype(&::hipModuleLaunchKernel) ModuleLaunchKernel    = nullptr;
+
+    // Streams.
+    decltype(&::hipStreamCreateWithFlags) StreamCreateWithFlags = nullptr;
+    decltype(&::hipStreamDestroy) StreamDestroy                 = nullptr;
+    decltype(&::hipStreamSynchronize) StreamSynchronize         = nullptr;
 
     // Textures.
     decltype(&::hipMallocMipmappedArray) MallocMipmappedArray     = nullptr;
@@ -174,6 +181,8 @@ HipRuntime::load()
               && get(hip, "hipGetDevicePropertiesR0600", a.GetDeviceProperties,
                      e)
               && get(hip, "hipFree", a.Free, e)
+              && get(hip, "hipHostMalloc", a.HostMalloc, e)
+              && get(hip, "hipHostFree", a.HostFree, e)
               && get(hip, "hipMemcpy", a.Memcpy, e)
               && get(hip, "hipMemset", a.Memset, e)
               && get(hip, "hipGetDeviceCount", a.GetDeviceCount, e)
@@ -195,6 +204,9 @@ HipRuntime::load()
               && get(rtc, "hiprtcLinkAddData", a.LinkAddData, e)
               && get(rtc, "hiprtcLinkComplete", a.LinkComplete, e)
               && get(rtc, "hiprtcLinkDestroy", a.LinkDestroy, e);
+    ok = ok && get(hip, "hipStreamCreateWithFlags", a.StreamCreateWithFlags, e)
+         && get(hip, "hipStreamDestroy", a.StreamDestroy, e)
+         && get(hip, "hipStreamSynchronize", a.StreamSynchronize, e);
     ok = ok && get(hip, "hipMallocMipmappedArray", a.MallocMipmappedArray, e)
          && get(hip, "hipFreeMipmappedArray", a.FreeMipmappedArray, e)
          && get(hip, "hipGetMipmappedArrayLevel", a.GetMipmappedArrayLevel, e)
@@ -260,6 +272,23 @@ HipRuntime::free(void* device_ptr)
 {
     if (device_ptr)
         m_api->Free(device_ptr);
+}
+
+void*
+HipRuntime::host_alloc(size_t size)
+{
+    void* p = nullptr;
+    return check(m_api->HostMalloc(&p, size, hipHostMallocDefault),
+                 "hipHostMalloc")
+               ? p
+               : nullptr;
+}
+
+void
+HipRuntime::host_free(void* host_ptr)
+{
+    if (host_ptr)
+        m_api->HostFree(host_ptr);
 }
 
 bool
@@ -374,12 +403,6 @@ HipRuntime::kernel(void* module, const char* name)
 }
 
 bool
-HipRuntime::launch_one(void* kernel, void** args)
-{
-    return launch(kernel, 1, 1, args);
-}
-
-bool
 HipRuntime::launch(void* kernel, unsigned grid_x, unsigned block_x, void** args)
 {
     return check(m_api->ModuleLaunchKernel(hipFunction_t(kernel), grid_x, 1, 1,
@@ -387,6 +410,44 @@ HipRuntime::launch(void* kernel, unsigned grid_x, unsigned block_x, void** args)
                                            nullptr),
                  "hipModuleLaunchKernel")
            && check(m_api->DeviceSynchronize(), "hipDeviceSynchronize");
+}
+
+
+
+void*
+HipRuntime::stream_create()
+{
+    // Non-blocking: work on it does not wait for the default stream, which
+    // the blocking copies of the other calls use.
+    hipStream_t stream = nullptr;
+    return check(m_api->StreamCreateWithFlags(&stream, hipStreamNonBlocking),
+                 "hipStreamCreateWithFlags")
+               ? stream
+               : nullptr;
+}
+
+void
+HipRuntime::stream_destroy(void* stream)
+{
+    if (stream)
+        m_api->StreamDestroy(hipStream_t(stream));
+}
+
+bool
+HipRuntime::launch_async(void* kernel, unsigned grid_x, unsigned block_x,
+                         void** args, void* stream)
+{
+    return check(m_api->ModuleLaunchKernel(hipFunction_t(kernel), grid_x, 1, 1,
+                                           block_x, 1, 1, 0,
+                                           hipStream_t(stream), args, nullptr),
+                 "hipModuleLaunchKernel");
+}
+
+bool
+HipRuntime::stream_wait(void* stream)
+{
+    return check(m_api->StreamSynchronize(hipStream_t(stream)),
+                 "hipStreamSynchronize");
 }
 
 
