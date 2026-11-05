@@ -256,8 +256,8 @@ macro ( TESTSUITE )
         endif ()
 
         # When the tests that need an AMD GPU are enabled, also run
-        # testshade on the GPU (testshade --amdgpu-run) if there is an AMDGPU
-        # marker file in the directory.
+        # testshade or testrender on the GPU (--amdgpu-run) if there is an
+        # AMDGPU marker file in the directory.
         if (OSL_ENABLE_AMDGPU AND OSL_TEST_AMDGPU_RUN
             AND EXISTS "${_testsrcdir}/AMDGPU"
             AND NOT EXISTS "${_testsrcdir}/BATCHED_REGRESSION")
@@ -267,11 +267,13 @@ macro ( TESTSUITE )
                 AND NOT EXISTS "${_testsrcdir}/AMDGPU_OPTIMIZEONLY")
                 add_one_testsuite ("${_testname}.amdgpu" "${_testsrcdir}"
                                    ENV TESTSHADE_OPT=0 TESTSHADE_AMDGPU=1
+                                       TESTRENDER_AMDGPU=1
                                        HIP_PATH=${ROCM_PATH} )
             endif ()
             # and optimized
             add_one_testsuite ("${_testname}.amdgpu.opt" "${_testsrcdir}"
                                ENV TESTSHADE_OPT=2 TESTSHADE_AMDGPU=1
+                                   TESTRENDER_AMDGPU=1
                                    HIP_PATH=${ROCM_PATH} )
         endif ()
 
