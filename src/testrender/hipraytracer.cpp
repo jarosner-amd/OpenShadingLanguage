@@ -36,30 +36,39 @@ struct HipRaytracer::GpuGroup {
     void* interactive     = nullptr;  // device copy, owned by the group
 };
 
-// The device memory of shading calls, reused by every call.
+// The device memory that every shading call reads.
 struct HipRaytracer::Device {
-    char* state   = nullptr;  // RenderState
     char* context = nullptr;  // RenderContext
     char* uniform = nullptr;  // the shading-state block
-    // The call block (see below) and its copy on the host.
-    char* block       = nullptr;
-    size_t block_size = 0;
-    std::vector<char> staging;
-    // The same for a batch of independent points (execute_group_batch).
+    // The device memory of a batch of independent points
+    // (execute_group_batch) and its copy on the host.
     char* batch       = nullptr;
     size_t batch_size = 0;
     std::vector<char> batch_staging;
+};
+
+// What one CPU thread needs for its shading calls (execute_group): its own
+// stream, so that several threads have calls in flight at once and each waits
+// only for its own, and its own memory for them.
+struct HipRaytracer::CallSlot {
+    void* stream = nullptr;
+    char* state  = nullptr;  // RenderState, pointing at this block's pool
+    // The call block (see below), in page-locked host memory.
+    char* block       = nullptr;
+    size_t block_size = 0;
 };
 
 // StackClosurePool is its 1024-byte buffer, then the next free address.
 static_assert(sizeof(StackClosurePool) == 1024 + sizeof(void*),
               "StackClosurePool layout changed");
 
-// Everything a shading call sends to the GPU or reads back is in one device
-// buffer, the call block, so that a call is one copy in, one launch and one
-// copy out: each blocking HIP call costs 50 to 70 us. In order: the
-// ShaderGlobals, the closure pool, three transforms (identity, shader2common,
-// object2common), then the group data. The first two come back.
+// Everything a shading call sends to the GPU or reads back is in one buffer,
+// the call block. It is page-locked host memory that the GPU reads and writes
+// directly, so a call is a single launch: each HIP command costs tens of us,
+// and a copy in, a launch and a copy out took about 5 times as long. In
+// order: the ShaderGlobals, the closure pool, three transforms (identity,
+// shader2common, object2common), then the group data. The first two come
+// back.
 static constexpr size_t
 round_up(size_t n, size_t alignment)
 {
@@ -79,12 +88,17 @@ class HipRuntime {};
 class AmdgpuTextures {};
 struct HipRaytracer::GpuGroup {};
 struct HipRaytracer::Device {};
+struct HipRaytracer::CallSlot {};
 
 #endif
 
 
 
-HipRaytracer::HipRaytracer() = default;
+static std::atomic<unsigned long long> s_next_id { 1 };
+
+HipRaytracer::HipRaytracer() : m_id(s_next_id++)
+{
+}
 
 HipRaytracer::~HipRaytracer()
 {
@@ -93,9 +107,13 @@ HipRaytracer::~HipRaytracer()
         m_textures.reset();
         for (auto& g : m_groups)
             m_hip->unload_module(g.second->module);
+        for (auto& s : m_slots) {
+            m_hip->stream_destroy(s->stream);
+            m_hip->free(s->state);
+            m_hip->host_free(s->block);
+        }
         if (m_dev)
-            for (char* p : { m_dev->state, m_dev->context, m_dev->uniform,
-                             m_dev->block, m_dev->batch })
+            for (char* p : { m_dev->context, m_dev->uniform, m_dev->batch })
                 m_hip->free(p);
     }
 #endif
@@ -459,31 +477,33 @@ HipRaytracer::execute_group(ShadingContext& ctx, ShaderGroup& group,
 {
     if (!m_run)
         return SimpleRaytracer::execute_group(ctx, group, sg, kind);
-    std::lock_guard<std::mutex> lock(m_mutex);
     if (!m_ok)
         return false;
+    // The groups are set up before rendering, and the shared device memory
+    // before this thread's first call (in call_slot). Both are only read
+    // here, so calls from several threads run without a lock.
     auto found = m_groups.find(&group);
     if (found == m_groups.end())
         return fail("a shader group has no GPU code object");
     const GpuGroup& g = *found->second;
     HipRuntime& hip   = *m_hip;
-
-    if (!init_device())
+    CallSlot* slot    = call_slot();
+    if (!slot)
         return false;
-    Device& d           = *m_dev;
+    CallSlot& d         = *slot;
     const size_t needed = k_groupdata_offset + g.groupdata_size;
     if (needed > d.block_size) {
-        // A larger group than any before: a new call block. Nothing in it
-        // outlives a call, but the render state points at its closure pool.
-        hip.free(d.block);
-        d.block      = nullptr;
+        // A larger group than any before in this thread: a new call block.
+        // Nothing in it outlives a call, but the render state points at its
+        // closure pool.
+        hip.host_free(d.block);
         d.block_size = 0;
-        d.block      = (char*)hip.alloc(needed);
+        d.block      = (char*)hip.host_alloc(needed);
         if (!d.block)
             return fail(hip.error());
         d.block_size = needed;
-        d.staging.assign(needed, 0);
-        RenderState rs { reinterpret_cast<RenderContext*>(d.context),
+        std::memset(d.block, 0, needed);
+        RenderState rs { reinterpret_cast<RenderContext*>(m_dev->context),
                          reinterpret_cast<StackClosurePool*>(d.block
                                                              + k_pool_offset) };
         if (!hip.to_device(d.state, &rs, sizeof(rs)))
@@ -492,14 +512,14 @@ HipRaytracer::execute_group(ShadingContext& ctx, ShaderGroup& group,
 
     // The globals with device pointers. Transforms that are null mean
     // identity, as in SimpleRaytracer::get_matrix.
-    char* const stage       = d.staging.data();
+    char* const stage       = d.block;
     ShaderGlobals dsg       = sg;
     dsg.renderstate         = d.state;
     dsg.tracedata           = nullptr;
     dsg.objdata             = nullptr;
     dsg.context             = nullptr;
     dsg.renderer            = nullptr;
-    dsg.shadingStateUniform = d.uniform;
+    dsg.shadingStateUniform = m_dev->uniform;
     dsg.Ci                  = nullptr;
     Matrix44 identity;
     identity.makeIdentity();
@@ -526,9 +546,8 @@ HipRaytracer::execute_group(ShadingContext& ctx, ShaderGroup& group,
     void* groupdata   = d.block + k_groupdata_offset;
     void* interactive = g.interactive;
     void* args[]      = { &globals, &groupdata, &interactive };
-    if (!hip.to_device(d.block, stage, needed)
-        || !hip.launch_one(g.kernel, args)
-        || !hip.to_host(stage, d.block, k_xforms_offset))
+    if (!hip.launch_async(g.kernel, 1, 1, args, d.stream)
+        || !hip.stream_wait(d.stream))
         return fail(hip.error());
 
     // Back: the globals (displacement moves P) and the closures, which
@@ -573,17 +592,45 @@ HipRaytracer::init_device()
         || !block || size <= 0)
         return fail("no shading_state_uniform from the ShadingSystem");
     auto dev     = std::make_unique<Device>();
-    dev->state   = (char*)hip.alloc(sizeof(RenderState));
     dev->context = (char*)hip.alloc(sizeof(RenderContext));
     dev->uniform = (char*)hip.alloc(size_t(size));
     RenderContext rc {};
     fill_render_context(rc);
     m_dev = std::move(dev);
-    if (!m_dev->state || !m_dev->context || !m_dev->uniform
+    if (!m_dev->context || !m_dev->uniform
         || !hip.to_device(m_dev->context, &rc, sizeof(rc))
         || !hip.to_device(m_dev->uniform, block, size_t(size)))
         return fail(hip.error());
     return true;
+}
+
+
+
+// The calling thread's call slot, made on its first shading call (with the
+// shared device memory, the first time any thread calls). Null on failure.
+HipRaytracer::CallSlot*
+HipRaytracer::call_slot()
+{
+    thread_local unsigned long long owner = 0;
+    thread_local CallSlot* slot           = nullptr;
+    if (owner == m_id)
+        return slot;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!init_device())
+        return nullptr;
+    auto s    = std::make_unique<CallSlot>();
+    s->stream = m_hip->stream_create();
+    s->state  = (char*)m_hip->alloc(sizeof(RenderState));
+    if (!s->stream || !s->state) {
+        m_hip->stream_destroy(s->stream);
+        m_hip->free(s->state);
+        fail(m_hip->error());
+        return nullptr;
+    }
+    slot  = s.get();
+    owner = m_id;
+    m_slots.push_back(std::move(s));
+    return slot;
 }
 
 

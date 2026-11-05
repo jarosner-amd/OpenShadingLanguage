@@ -35,6 +35,10 @@ public:
 
     void* alloc(size_t size);
     void free(void* device_ptr);
+    // Page-locked host memory, which kernels can also read and write
+    // directly. Null on failure.
+    void* host_alloc(size_t size);
+    void host_free(void* host_ptr);
     bool to_device(void* dst, const void* src, size_t size);
     bool to_host(void* dst, const void* src, size_t size);
     bool fill(void* dst, int value, size_t size);
@@ -48,10 +52,20 @@ public:
     void* load_module(const std::vector<char>& code_object);
     void unload_module(void* module);
     void* kernel(void* module, const char* name);
-    // Run a kernel with one thread and wait for it.
-    bool launch_one(void* kernel, void** args);
     // Run a kernel with grid_x blocks of block_x threads and wait for it.
     bool launch(void* kernel, unsigned grid_x, unsigned block_x, void** args);
+
+    // A stream of its own for one CPU thread: work queued on it runs in
+    // order, and waiting for it does not wait for other threads' streams.
+    // Null on failure.
+    void* stream_create();
+    void stream_destroy(void* stream);
+    // Queue a kernel with grid_x blocks of block_x threads on `stream`,
+    // without waiting.
+    bool launch_async(void* kernel, unsigned grid_x, unsigned block_x,
+                      void** args, void* stream);
+    // Wait for everything queued on `stream`.
+    bool stream_wait(void* stream);
 
     // One mip level of a texture: width x height texels of 4 floats.
     struct TextureLevel {

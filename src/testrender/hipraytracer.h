@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -74,6 +75,7 @@ public:
 private:
     struct GpuGroup;
     struct Device;
+    struct CallSlot;
 
     bool compile_group(ShaderGroup& group, string_view stem);
     bool build_module(ShaderGroup& group, const std::vector<char>& artifact,
@@ -81,16 +83,22 @@ private:
     bool relocate_closures(char* pool, const char* device_base,
                            ClosureColor*& ci);
     bool init_device();
+    CallSlot* call_slot();
     bool fail(string_view message);
 
     bool m_save = false;
-    bool m_ok   = true;
-    bool m_run  = false;
+    std::atomic<bool> m_ok { true };
+    bool m_run = false;
     std::string m_arch;
     std::unique_ptr<HipRuntime> m_hip;
     std::unique_ptr<Device> m_dev;
     std::unordered_map<const ShaderGroup*, std::unique_ptr<GpuGroup>> m_groups;
-    std::mutex m_mutex;  // one GPU shading call at a time
+    // A call slot for each CPU thread that has shaded on the GPU. Threads
+    // find theirs by m_id, which no other renderer of this run has.
+    std::vector<std::unique_ptr<CallSlot>> m_slots;
+    const unsigned long long m_id;
+    // Guards the setup (device memory, call slots) and the batch calls.
+    std::mutex m_mutex;
     // The GPU textures, by file (shared with testshade).
     std::unique_ptr<AmdgpuTextures> m_textures;
 };
