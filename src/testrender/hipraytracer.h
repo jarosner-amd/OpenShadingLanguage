@@ -76,6 +76,7 @@ private:
     struct GpuGroup;
     struct Device;
     struct CallSlot;
+    struct GpuCall;
 
     bool compile_group(ShaderGroup& group, string_view stem);
     bool build_module(ShaderGroup& group, const std::vector<char>& artifact,
@@ -84,6 +85,7 @@ private:
                            ClosureColor*& ci);
     bool init_device();
     CallSlot* call_slot();
+    bool share_launch(GpuGroup& g, GpuCall& call);
     bool fail(string_view message);
 
     bool m_save = false;

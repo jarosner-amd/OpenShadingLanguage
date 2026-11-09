@@ -5,6 +5,7 @@
 #include "hipraytracer.h"
 
 #include <cctype>
+#include <condition_variable>
 #include <cstring>
 
 #include <OpenImageIO/imagebuf.h>
@@ -27,13 +28,36 @@ OSL_NAMESPACE_BEGIN
 
 #ifdef OSL_TESTRENDER_HIP
 
-// A shader group made ready to run: its code object and kernel.
+// One shading call waiting to share a launch (see execute_group).
+struct HipRaytracer::GpuCall {
+    void* globals   = nullptr;
+    void* groupdata = nullptr;
+    bool done       = false;
+    bool ok         = true;
+};
+
+// The most calls in one shared launch.
+static constexpr size_t k_max_calls = 1024;
+
+// A shader group made ready to run: its code object and kernels.
 struct HipRaytracer::GpuGroup {
     void* module          = nullptr;
-    void* kernel          = nullptr;
+    void* list_kernel     = nullptr;  // one thread per call in `list`
     void* batch_kernel    = nullptr;  // one thread per shading point
     size_t groupdata_size = 0;
     void* interactive     = nullptr;  // device copy, owned by the group
+
+    // The calls of all threads to this group share launches. One thread at
+    // a time launches all the calls waiting, on `stream`, while the others
+    // wait for `wake`.
+    std::mutex mutex;
+    std::condition_variable wake;
+    std::vector<GpuCall*> waiting;
+    bool launching = false;
+    void* stream   = nullptr;
+    // Page-locked: the globals of each call in a launch, then their group
+    // data, k_max_calls of each.
+    void** list = nullptr;
 };
 
 // The device memory that every shading call reads.
@@ -48,11 +72,9 @@ struct HipRaytracer::Device {
 };
 
 // What one CPU thread needs for its shading calls (execute_group): its own
-// stream, so that several threads have calls in flight at once and each waits
-// only for its own, and its own memory for them.
+// memory for them, so that the calls of several threads can share a launch.
 struct HipRaytracer::CallSlot {
-    void* stream = nullptr;
-    char* state  = nullptr;  // RenderState, pointing at this block's pool
+    char* state = nullptr;  // RenderState, pointing at this block's pool
     // The call block (see below), in page-locked host memory.
     char* block       = nullptr;
     size_t block_size = 0;
@@ -64,11 +86,11 @@ static_assert(sizeof(StackClosurePool) == 1024 + sizeof(void*),
 
 // Everything a shading call sends to the GPU or reads back is in one buffer,
 // the call block. It is page-locked host memory that the GPU reads and writes
-// directly, so a call is a single launch: each HIP command costs tens of us,
-// and a copy in, a launch and a copy out took about 5 times as long. In
-// order: the ShaderGlobals, the closure pool, three transforms (identity,
-// shader2common, object2common), then the group data. The first two come
-// back.
+// directly, so a call needs no copies, only its part of a launch: each HIP
+// command costs tens of us, and the GPU runs only about 9000 launches a
+// second, however many threads or processes make them. In order: the
+// ShaderGlobals, the closure pool, three transforms (identity, shader2common,
+// object2common), then the group data. The first two come back.
 static constexpr size_t
 round_up(size_t n, size_t alignment)
 {
@@ -105,10 +127,12 @@ HipRaytracer::~HipRaytracer()
 #ifdef OSL_TESTRENDER_HIP
     if (m_hip) {
         m_textures.reset();
-        for (auto& g : m_groups)
+        for (auto& g : m_groups) {
+            m_hip->stream_destroy(g.second->stream);
+            m_hip->host_free(g.second->list);
             m_hip->unload_module(g.second->module);
+        }
         for (auto& s : m_slots) {
-            m_hip->stream_destroy(s->stream);
             m_hip->free(s->state);
             m_hip->host_free(s->block);
         }
@@ -311,9 +335,9 @@ HipRaytracer::run(std::string& error)
 
 
 
-// Make the GPU code object of one group: a one-point kernel that calls the
-// group's fused entry point, compiled with hiprtc and linked with the
-// renderer services and the group's artifact.
+// Make the GPU code object of one group: kernels that call the group's fused
+// entry point, for a list of calls and for a batch of points, compiled with
+// hiprtc and linked with the renderer services and the group's artifact.
 bool
 HipRaytracer::build_module(ShaderGroup& group,
                            const std::vector<char>& artifact,
@@ -325,9 +349,13 @@ HipRaytracer::build_module(ShaderGroup& group,
     std::string source = fmtformat(
         "extern \"C\" __device__ void {0}(void*, void*, void*, void*, int, "
         "void*);\n"
-        "extern \"C\" __global__ void osl_testrender_shade(void* sg, "
-        "void* gd, void* ip)\n"
-        "{{\n    {0}(sg, gd, nullptr, nullptr, 0, ip);\n}}\n"
+        "extern \"C\" __global__ void osl_testrender_shade_list(void** sgs, "
+        "void** gds, void* ip, int n)\n"
+        "{{\n"
+        "    int i = blockIdx.x * blockDim.x + threadIdx.x;\n"
+        "    if (i < n)\n"
+        "        {0}(sgs[i], gds[i], nullptr, nullptr, 0, ip);\n"
+        "}}\n"
         "extern \"C\" __global__ void osl_testrender_shade_batch(char* sgs, "
         "unsigned long long sg_stride, char* gds, "
         "unsigned long long gd_stride, void* ip, int n)\n"
@@ -348,11 +376,15 @@ HipRaytracer::build_module(ShaderGroup& group,
     auto g    = std::make_unique<GpuGroup>();
     g->module = m_hip->load_module(code);
     if (g->module) {
-        g->kernel       = m_hip->kernel(g->module, "osl_testrender_shade");
+        g->list_kernel  = m_hip->kernel(g->module, "osl_testrender_shade_list");
         g->batch_kernel = m_hip->kernel(g->module,
                                         "osl_testrender_shade_batch");
+        g->stream       = m_hip->stream_create();
+        g->list = (void**)m_hip->host_alloc(2 * k_max_calls * sizeof(void*));
     }
-    if (!g->kernel || !g->batch_kernel) {
+    if (!g->list_kernel || !g->batch_kernel || !g->stream || !g->list) {
+        m_hip->stream_destroy(g->stream);
+        m_hip->host_free(g->list);
         m_hip->unload_module(g->module);
         return fail(m_hip->error());
     }
@@ -481,13 +513,13 @@ HipRaytracer::execute_group(ShadingContext& ctx, ShaderGroup& group,
         return false;
     // The groups are set up before rendering, and the shared device memory
     // before this thread's first call (in call_slot). Both are only read
-    // here, so calls from several threads run without a lock.
+    // here; the launches are shared under the group's own lock.
     auto found = m_groups.find(&group);
     if (found == m_groups.end())
         return fail("a shader group has no GPU code object");
-    const GpuGroup& g = *found->second;
-    HipRuntime& hip   = *m_hip;
-    CallSlot* slot    = call_slot();
+    GpuGroup& g     = *found->second;
+    HipRuntime& hip = *m_hip;
+    CallSlot* slot  = call_slot();
     if (!slot)
         return false;
     CallSlot& d         = *slot;
@@ -542,13 +574,11 @@ HipRaytracer::execute_group(ShadingContext& ctx, ShaderGroup& group,
     std::memcpy(stage + k_pool_offset + 1024, &next, sizeof(next));
     if (g.groupdata_size)
         std::memset(stage + k_groupdata_offset, 0, g.groupdata_size);
-    void* globals     = d.block + k_globals_offset;
-    void* groupdata   = d.block + k_groupdata_offset;
-    void* interactive = g.interactive;
-    void* args[]      = { &globals, &groupdata, &interactive };
-    if (!hip.launch_async(g.kernel, 1, 1, args, d.stream)
-        || !hip.stream_wait(d.stream))
-        return fail(hip.error());
+    GpuCall call;
+    call.globals   = d.block + k_globals_offset;
+    call.groupdata = d.block + k_groupdata_offset;
+    if (!share_launch(g, call))
+        return false;
 
     // Back: the globals (displacement moves P) and the closures, which
     // stay valid in this thread's buffer for this kind until its next call.
@@ -573,6 +603,55 @@ HipRaytracer::execute_group(ShadingContext& ctx, ShaderGroup& group,
     sg.object2common       = host.object2common;
     sg.Ci                  = ci;
     return true;
+}
+
+
+
+// Run one call, in a launch shared with the calls of other threads to the
+// same group. Whichever thread finds no launch running launches every call
+// waiting; the others wait until it is done. So a call waits at most for the
+// launch already running, and while one runs the next one fills up.
+bool
+HipRaytracer::share_launch(GpuGroup& g, GpuCall& call)
+{
+    std::unique_lock<std::mutex> lock(g.mutex);
+    g.waiting.push_back(&call);
+    while (!call.done) {
+        if (g.launching) {
+            g.wake.wait(lock);
+            continue;
+        }
+        g.launching    = true;
+        const size_t n = std::min(g.waiting.size(), k_max_calls);
+        std::vector<GpuCall*> calls(g.waiting.begin(), g.waiting.begin() + n);
+        g.waiting.erase(g.waiting.begin(), g.waiting.begin() + n);
+        lock.unlock();
+
+        for (size_t i = 0; i < n; ++i) {
+            g.list[i]               = calls[i]->globals;
+            g.list[k_max_calls + i] = calls[i]->groupdata;
+        }
+        void* sgs         = g.list;
+        void* gds         = g.list + k_max_calls;
+        void* interactive = g.interactive;
+        int count         = int(n);
+        void* args[]      = { &sgs, &gds, &interactive, &count };
+        const bool ok = m_hip->launch_async(g.list_kernel,
+                                            unsigned((n + 63) / 64), 64, args,
+                                            g.stream)
+                        && m_hip->stream_wait(g.stream);
+        if (!ok)
+            fail(m_hip->error());
+
+        lock.lock();
+        for (GpuCall* c : calls) {
+            c->ok   = ok;
+            c->done = true;
+        }
+        g.launching = false;
+        g.wake.notify_all();
+    }
+    return call.ok;
 }
 
 
@@ -618,12 +697,9 @@ HipRaytracer::call_slot()
     std::lock_guard<std::mutex> lock(m_mutex);
     if (!init_device())
         return nullptr;
-    auto s    = std::make_unique<CallSlot>();
-    s->stream = m_hip->stream_create();
-    s->state  = (char*)m_hip->alloc(sizeof(RenderState));
-    if (!s->stream || !s->state) {
-        m_hip->stream_destroy(s->stream);
-        m_hip->free(s->state);
+    auto s   = std::make_unique<CallSlot>();
+    s->state = (char*)m_hip->alloc(sizeof(RenderState));
+    if (!s->state) {
         fail(m_hip->error());
         return nullptr;
     }
