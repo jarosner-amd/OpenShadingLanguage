@@ -218,18 +218,10 @@ osl_prepend_matrix_from(OpaqueExecContextPtr oec, void* r,
                         ustringhash_pod from_)
 {
     Matrix44 m;
+    // osl_get_matrix reports an unknown space name itself.
     bool ok = osl_get_matrix(oec, &m, from_);
     if (ok)
         MAT(r) = m * MAT(r);
-#if OSL_SHADEOPS_RS_ONLY
-    // TODO: How do we manage this in OptiX?
-    else {
-        if (get_unknown_coordsys_error(oec)) {
-            OSL::errorfmt(oec, OSL::pvt::ShadeopsHashes::unknown_transformation,
-                          ustringhash_from(from_));
-        }
-    }
-#endif
     return ok;
 }
 

@@ -1,0 +1,13 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
+// matrix("name", m) with an unknown space name prepends that space's
+// matrix. The unknown name must be reported once per shading point; the
+// test runs with error_repeats=1, so a repeated report would show.
+
+shader test_prependmatrix (output color Cout_matrix = 0)
+{
+    matrix m = matrix("spam", 1);
+    Cout_matrix = color(m[0][0], m[1][1], m[2][2]);
+}
