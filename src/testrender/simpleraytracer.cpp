@@ -418,6 +418,12 @@ SimpleRaytracer::parse_scene_xml(const std::string& scenefile)
                                                      commands);
             else
                 group = shadingsys->ShaderGroupBegin(name);
+            if (!group) {
+                // ShaderGroupBegin has reported why. Stop, as testshade
+                // does: the code below would use the missing group.
+                errhandler().severefmt("Invalid shader group \"{}\"", name);
+                continue;
+            }
             ParamStorage<1024>
                 store;  // scratch space to hold parameters until they are read by Shader()
             for (pugi::xml_node gnode = node.first_child(); gnode;
