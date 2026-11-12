@@ -52,14 +52,16 @@ struct Background {
 
     // Build the importance table with a callback for one direction. This
     // calls it once per texel, as it always did; a renderer that can do
-    // better should use prepare_rows.
-    template<typename F, typename T> void prepare(int resolution, F cb, T* data)
+    // better should use prepare_rows. Returns false, and the table must not
+    // be used, if the background has no energy at all (it is black
+    // everywhere), so there is nothing to sample.
+    template<typename F, typename T> bool prepare(int resolution, F cb, T* data)
     {
-        prepare_rows(resolution,
-                     [&](const Dual2<Vec3>* dirs, Vec3* out, int n) {
-                         for (int i = 0; i < n; ++i)
-                             out[i] = cb(dirs[i], data);
-                     });
+        return prepare_rows(resolution,
+                            [&](const Dual2<Vec3>* dirs, Vec3* out, int n) {
+                                for (int i = 0; i < n; ++i)
+                                    out[i] = cb(dirs[i], data);
+                            });
     }
 
     // Build the importance table. `rows_cb(dirs, out, n)` gives the values
@@ -67,8 +69,9 @@ struct Background {
     // renderer can evaluate a whole scanline at once, for example in one
     // GPU launch. This function itself only changes the order of the work:
     // all the directions of a scanline are made first, then evaluated by
-    // one call, then the table is updated from them.
-    template<typename R> void prepare_rows(int resolution, R rows_cb)
+    // one call, then the table is updated from them. Returns false for a
+    // black background, like prepare.
+    template<typename R> bool prepare_rows(int resolution, R rows_cb)
     {
         // These values are set via set_variables() in CUDA
         res = resolution;
@@ -96,6 +99,10 @@ struct Background {
                 for (int x = 0; x < res; x++)
                     cols[i - res + x] /= cols[i - 1];
         }
+        // A black background: normalizing would divide by zero and leave
+        // NaN in the table, and sampling it would index out of range.
+        if (!(rows[res - 1] > 0))
+            return false;
         // normalize the pdf across all scanlines
         for (int y = 0; y < res; y++) {
             rows[y] /= rows[res - 1];
@@ -118,6 +125,7 @@ struct Background {
             out->write_image(TypeFloat, &values[0]);
         delete out;
 #endif
+        return true;
     }
 
     OSL_HOSTDEVICE
