@@ -69,10 +69,12 @@ public:
     virtual void operator()(int errcode, const std::string& msg)
     {
         OIIO::ErrorHandler::operator()(errcode, msg);
-        if (errcode & OIIO::ErrorHandler::EH_ERROR
-            || errcode & OIIO::ErrorHandler::EH_SEVERE)
+        // The levels are numbers, not bit flags.
+        int level = errcode & 0xffff0000;
+        if (level == OIIO::ErrorHandler::EH_ERROR
+            || level == OIIO::ErrorHandler::EH_SEVERE)
             m_rend.m_had_error = true;
-        if (errcode & OIIO::ErrorHandler::EH_SEVERE)
+        if (level == OIIO::ErrorHandler::EH_SEVERE)
             exit(EXIT_FAILURE);
     }
 
