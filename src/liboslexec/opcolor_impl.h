@@ -95,12 +95,16 @@ OSL_HOSTDEVICE static Color3
 wavelength_color_XYZ(float lambda_nm)
 {
     float ii = (lambda_nm - 380.0f) / 5.0f;  // scaled 0..80
-    int i    = (int)ii;
-    // NOTE: bitwise OR to avoid branchiness logical OR introduces.
+    // Test the float before converting it: converting NaN, or a value out of
+    // int range, is undefined. This gives the same result as testing the
+    // truncated index (i < 0 or i >= 80) for every other value, and black
+    // for NaN, which fails both comparisons.
+    // NOTE: bitwise AND to avoid branchiness logical AND introduces.
     // Also when left as logical OR, vectorizing with clang 11 did not
     // mask off gathering of out of range index values causing segfaults
-    if ((i < 0) | (i >= 80))
+    if (!((ii > -1.0f) & (ii < 80.0f)))
         return Color3(0.0f, 0.0f, 0.0f);
+    int i           = (int)ii;
     float remainder = ii - i;
     // Do not separate address calculation so that compiler can see that the
     // base pointer is uniform for all data lanes and 32bit indices can be
