@@ -31,7 +31,7 @@ enum class EncodedType : uint8_t {
 // parameter alongwith a fmtlib specifier identified by the ustring that the format_hash represents.
 // Contents of decoded_str are written over (not appended).
 // Returns # of bytes read from arg_values
-int
+OSLEXECPUBLIC int
 decode_message(uint64_t format_hash, int32_t arg_count,
                const EncodedType* arg_types, const uint8_t* arg_values,
                std::string& decoded_str);
