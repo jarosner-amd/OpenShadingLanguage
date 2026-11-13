@@ -5,6 +5,8 @@
 
 #include <cinttypes>
 #include <memory>
+#include <string>
+#include <unordered_map>
 
 #include <OpenImageIO/fmath.h>
 #include <OpenImageIO/thread.h>
@@ -41,6 +43,7 @@ OSL_GCC_PRAGMA(GCC diagnostic ignored "-Wmaybe-uninitialized")
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/TypeFinder.h>
 #include <llvm/IR/ValueSymbolTable.h>
 #include <llvm/Linker/Linker.h>
 #include <llvm/Support/CommandLine.h>
@@ -6573,13 +6576,73 @@ LLVM_Util::emit_nvptx_ptx(llvm::Module*, std::string& out)
 
 
 
+// Rename the module's named struct types to names that depend only on the
+// module's own contents: the name without its numeric suffixes, numbered in
+// the order the module uses the types. In a context that compiled other
+// groups before, LLVM gives a reused type name a suffix (".125") that depends
+// on what was compiled earlier, so the same group got different bitcode on
+// different runs, and a renderer's code cache keyed on the bitcode missed.
+// Opaque types keep their names: linking matches them by name.
+static void
+canonicalize_struct_type_names(llvm::Module& module)
+{
+    llvm::TypeFinder types;
+    types.run(module, /*onlyNamed=*/true);
+    std::vector<llvm::StructType*> renamed;
+    std::vector<std::string> bases;
+    for (llvm::StructType* type : types) {
+        if (type->isOpaque())
+            continue;
+        std::string base = type->getName().str();
+        // Strip every trailing ".<digits>".
+        for (;;) {
+            size_t dot = base.find_last_of('.');
+            if (dot == std::string::npos || dot + 1 == base.size()
+                || base.find_first_not_of("0123456789", dot + 1)
+                       != std::string::npos)
+                break;
+            base.resize(dot);
+        }
+        renamed.push_back(type);
+        bases.push_back(std::move(base));
+    }
+    // Clear the old names first, so no new name collides with an old one.
+    for (llvm::StructType* type : renamed)
+        type->setName("");
+    std::unordered_map<std::string, int> uses;
+    for (size_t i = 0; i < renamed.size(); ++i) {
+        const int n = uses[bases[i]]++;
+        renamed[i]->setName(n == 0 ? bases[i]
+                                   : bases[i] + "." + std::to_string(n));
+    }
+}
+
+
+
 bool
 LLVM_Util::emit_amdgpu_bitcode(llvm::Module* module, std::string& out)
 {
     if (!module)
         return false;
+    std::string bitcode;
+    {
+        llvm::raw_string_ostream stream(bitcode);
+        llvm::WriteBitcodeToFile(*module, stream);
+    }
+    // Make the struct type names independent of this context's history: read
+    // the module back into a fresh context, which holds only its own types,
+    // and rename them there. On any failure, keep the bitcode as written.
+    llvm::LLVMContext fresh_context;
+    auto fresh = llvm::parseBitcodeFile(llvm::MemoryBufferRef(bitcode, "group"),
+                                        fresh_context);
+    if (!fresh) {
+        llvm::consumeError(fresh.takeError());
+        out = std::move(bitcode);
+        return true;
+    }
+    canonicalize_struct_type_names(**fresh);
     llvm::raw_string_ostream stream(out);
-    llvm::WriteBitcodeToFile(*module, stream);
+    llvm::WriteBitcodeToFile(**fresh, stream);
     return true;
 }
 
