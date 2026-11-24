@@ -660,13 +660,14 @@ if (OSL_USE_HART)
         COMPILE_DEFINITIONS __HIP_PLATFORM_AMD__=1)
 endif ()
 
-# Disable RTTI from just the one module where we have classes that inherit
-# from LLVM classes.
+# Disable RTTI from just the modules where we have classes that inherit
+# from LLVM classes. llvm_instance.cpp derives from llvm::DiagnosticHandler;
+# with RTTI on, GNU ld needs its typeinfo, which a no-RTTI LLVM lacks.
 if (MSVC)
-    set_source_files_properties (llvm_util.cpp
+    set_source_files_properties (llvm_util.cpp llvm_instance.cpp
                                  PROPERTIES COMPILE_FLAGS "/GR-")
 else ()
-    set_source_files_properties (llvm_util.cpp
+    set_source_files_properties (llvm_util.cpp llvm_instance.cpp
                                  PROPERTIES COMPILE_FLAGS "-fno-rtti")
 endif()
 
